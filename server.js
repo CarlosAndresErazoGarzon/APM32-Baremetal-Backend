@@ -27,9 +27,12 @@ function getAllFiles(dirPath, arrayOfFiles) {
 }
 
 app.post('/compile', (req, res) => {
-    const { mainContent } = req.body;
-    if (!mainContent) {
-        return res.status(400).json({ error: 'mainContent is required' });
+    const { files, mainContent } = req.body;
+    
+    const projectFiles = files || (mainContent ? { 'main.c': mainContent } : null);
+
+    if (!projectFiles || Object.keys(projectFiles).length === 0) {
+        return res.status(400).json({ error: 'Source files are required' });
     }
 
     const jobId = crypto.randomBytes(8).toString('hex');
@@ -59,7 +62,10 @@ app.post('/compile', (req, res) => {
             }
         });
 
-        fs.writeFileSync(path.join(srcDir, 'main.c'), mainContent);
+        for (const [filename, content] of Object.entries(projectFiles)) {
+            const isHeader = filename.endsWith('.h');
+            fs.writeFileSync(path.join(isHeader ? incDir : srcDir, filename), content || '');
+        }
         
         fs.writeFileSync(path.join(incDir, 'apm32_config.h'), '#ifndef APM_CFG\n#define APM_CFG\n#include "apm32f10x.h"\nvoid APM32_Init(void);\n#endif');
         fs.writeFileSync(path.join(srcDir, 'apm32_config.c'), '#include "apm32_config.h"\n#include "delay.h"\n__attribute__((weak)) void APM32_Init(void) { SystemInit(); SysTick_Init(); }');
