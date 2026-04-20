@@ -13,3 +13,6 @@ flash.log
 .vscode/
 .idea/
 *.swp
+
+GETTING_STARTED.md
+docs/

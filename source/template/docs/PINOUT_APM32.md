@@ -2,7 +2,7 @@
 
 As a baremetal developer, knowing the hardware is critical. Below is the complete pinout map for the APM32F103 board (BluePill format), detailing their primary functions, 5V tolerance, and most common alternate functions.
 
-### Conceptos Clave Antes de Leer la Tabla -> Key Concepts Before Reading the Table
+### Key Concepts Before Reading the Table
 
 1. **Memory Addresses**: In the APM32 architecture, individual pins *do not have* their own dedicated memory address. Pins are grouped into Ports (`GPIOA`, `GPIOB`, etc.). Each port has a base address (e.g., `GPIOA` = `0x4001 0800`). To control a pin, you modify the corresponding bits within its port registers (`CFGLOW` for pins 0 to 7, and `CFGHIG` for pins 8 to 15).
 2. **5V Tolerance (3.3V Native)**: The microcontroller runs internally at **3.3V**. If a pin says "Yes" under 5V Tolerant, it means you can safely hook up a 5V signal (like a standard Arduino sensor). If it says "**No**", the absolute maximum limit is **3.3V**; connecting 5V will physically destroy the pin.

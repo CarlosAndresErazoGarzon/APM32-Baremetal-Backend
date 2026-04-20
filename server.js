@@ -68,8 +68,12 @@ app.post('/compile', (req, res) => {
             fs.writeFileSync(path.join(isHeader ? incDir : srcDir, filename), content || '');
         }
         
-        fs.writeFileSync(path.join(incDir, 'apm32_config.h'), '#ifndef APM_CFG\n#define APM_CFG\n#include "apm32f10x.h"\nvoid APM32_Init(void);\n#endif');
-        fs.writeFileSync(path.join(srcDir, 'apm32_config.c'), '#include "apm32_config.h"\n#include "delay.h"\n__attribute__((weak)) void APM32_Init(void) { SystemInit(); SysTick_Init(); }');
+        if (!projectFiles['apm32_config.h']) {
+            fs.writeFileSync(path.join(incDir, 'apm32_config.h'), '#ifndef APM_CFG\n#define APM_CFG\n#include "apm32f10x.h"\nvoid APM32_Init(void);\n#endif');
+        }
+        if (!projectFiles['apm32_config.c']) {
+            fs.writeFileSync(path.join(srcDir, 'apm32_config.c'), '#include "apm32_config.h"\n#include "delay.h"\n__attribute__((weak)) void APM32_Init(void) { SystemInit(); SysTick_Init(); }');
+        }
 
         console.log(`[${jobId}] Compiling project...`);
         execSync('make -f build_tools/Makefile all', { cwd: tmpDir, stdio: 'pipe' });
