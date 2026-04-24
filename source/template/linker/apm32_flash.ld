@@ -22,7 +22,6 @@ SECTIONS
     } > FLASH
 
     /* Initialized Data */
-    /* _sidata is the address in FLASH where data sits before copying to RAM */
     _sidata = LOADADDR(.data);
 
     .data :
@@ -34,7 +33,7 @@ SECTIONS
         _edata = .;        /* End of data in RAM */
     } > RAM AT > FLASH
 
-    /* BSS Data (Zero-initialized) - Used by startup script */
+    /* BSS Data (Zero-initialized) */
     .bss :
     {
         . = ALIGN(4);
@@ -46,4 +45,9 @@ SECTIONS
         __bss_end = .;     
         __bss_end__ = .;   
     } > RAM
+
+    . = ALIGN(4);
+    _end = .;
+    end = _end;
+    __end = _end;
 }

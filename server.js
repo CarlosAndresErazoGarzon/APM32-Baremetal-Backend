@@ -26,6 +26,9 @@ function getAllFiles(dirPath, arrayOfFiles) {
     });
     return arrayOfFiles;
 }
+app.get('/health', (req, res) => {
+    res.json({ status: "OK", engine: "APM32-GCC" });
+});
 
 app.post('/compile', (req, res) => {
     const { files, mainContent } = req.body;
@@ -63,16 +66,29 @@ app.post('/compile', (req, res) => {
             }
         });
 
-        for (const [filename, content] of Object.entries(projectFiles)) {
-            const isHeader = filename.endsWith('.h');
-            fs.writeFileSync(path.join(isHeader ? incDir : srcDir, filename), content || '');
+        for (const [rawFilename, content] of Object.entries(projectFiles)) {
+            let relativePath = rawFilename;
+            const isHeader = rawFilename.endsWith('.h');
+            
+            // Check if user provided an explicit path like src/ or inc/
+            if (!rawFilename.startsWith('src/') && !rawFilename.startsWith('inc/')) {
+                relativePath = path.join(isHeader ? 'inc' : 'src', rawFilename);
+            }
+
+            const fullPath = path.join(tmpDir, relativePath);
+            const parentDir = path.dirname(fullPath);
+            
+            if (!fs.existsSync(parentDir)) {
+                fs.mkdirSync(parentDir, { recursive: true });
+            }
+            
+            fs.writeFileSync(fullPath, content || '');
         }
         
-        if (!projectFiles['apm32_config.h']) {
-            fs.writeFileSync(path.join(incDir, 'apm32_config.h'), '#ifndef APM_CFG\n#define APM_CFG\n#include "apm32f10x.h"\nvoid APM32_Init(void);\n#endif');
-        }
-        if (!projectFiles['apm32_config.c']) {
-            fs.writeFileSync(path.join(srcDir, 'apm32_config.c'), '#include "apm32_config.h"\n#include "delay.h"\n__attribute__((weak)) void APM32_Init(void) { SystemInit(); SysTick_Init(); }');
+        // Ensure standard entry points exist if not provided
+        const mainPath = path.join(tmpDir, 'src', 'main.c');
+        if (!fs.existsSync(mainPath) && !projectFiles['main.c'] && !projectFiles['src/main.c']) {
+             fs.writeFileSync(mainPath, '#include "apm32f10x.h"\nint main(void){ while(1); }');
         }
 
         console.log(`[${jobId}] Compiling project...`);
