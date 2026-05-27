@@ -9,4 +9,10 @@ extern volatile uint32_t msTicks;
 void SysTick_Init(void);
 void delay_ms(uint32_t ms);
 
+// Aliases for common naming conventions
+#define DelayMs     delay_ms
+#define Delay_ms    delay_ms
+#define delayMs     delay_ms
+#define DELAY_MS    delay_ms
+
 #endif

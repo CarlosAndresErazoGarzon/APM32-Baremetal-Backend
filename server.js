@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
@@ -6,7 +7,9 @@ const { execSync } = require('child_process');
 const crypto = require('crypto');
 
 const app = express();
-app.use(cors());
+app.use(cors({
+    exposedHeaders: ['X-Size-Text', 'X-Size-Data', 'X-Size-Bss']
+}));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
 
@@ -30,6 +33,18 @@ app.get('/health', (req, res) => {
     res.json({ status: "OK", engine: "APM32-GCC" });
 });
 
+app.get('/api/config', (req, res) => {
+    res.json({
+        apiKey: process.env.FIREBASE_API_KEY,
+        authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+        messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+        appId: process.env.FIREBASE_APP_ID,
+        measurementId: process.env.FIREBASE_MEASUREMENT_ID
+    });
+});
+
 app.post('/compile', (req, res) => {
     const { files, mainContent } = req.body;
     
@@ -49,9 +64,17 @@ app.post('/compile', (req, res) => {
         // Create src and inc if not existing
         const srcDir = path.join(tmpDir, 'src');
         const incDir = path.join(tmpDir, 'inc');
-        if (!fs.existsSync(srcDir)) fs.mkdirSync(srcDir);
-        if (!fs.existsSync(incDir)) fs.mkdirSync(incDir);
+        if (!fs.existsSync(srcDir)) fs.mkdirSync(srcDir, { recursive: true });
+        if (!fs.existsSync(incDir)) fs.mkdirSync(incDir, { recursive: true });
 
+        // Build a set of user-provided basenames to avoid duplicate symbols
+        const userFileBasenames = new Set();
+        for (const rawFilename of Object.keys(projectFiles)) {
+            const basename = path.basename(rawFilename);
+            userFileBasenames.add(basename);
+        }
+
+        // Copy component files ONLY if the user didn't provide them
         const allComponentDirs = fs.readdirSync(COMPONENTS_DIR).filter(f => fs.statSync(path.join(COMPONENTS_DIR, f)).isDirectory());
         
         allComponentDirs.forEach(comp => {
@@ -59,13 +82,22 @@ app.post('/compile', (req, res) => {
             const compInc = path.join(COMPONENTS_DIR, comp, 'inc');
             
             if (fs.existsSync(compSrc)) {
-                fs.readdirSync(compSrc).forEach(f => fs.copyFileSync(path.join(compSrc, f), path.join(srcDir, f)));
+                fs.readdirSync(compSrc).forEach(f => {
+                    if (!userFileBasenames.has(f)) {
+                        fs.copyFileSync(path.join(compSrc, f), path.join(srcDir, f));
+                    }
+                });
             }
             if (fs.existsSync(compInc)) {
-                fs.readdirSync(compInc).forEach(f => fs.copyFileSync(path.join(compInc, f), path.join(incDir, f)));
+                fs.readdirSync(compInc).forEach(f => {
+                    if (!userFileBasenames.has(f)) {
+                        fs.copyFileSync(path.join(compInc, f), path.join(incDir, f));
+                    }
+                });
             }
         });
 
+        // Write user files (these take priority over components)
         for (const [rawFilename, content] of Object.entries(projectFiles)) {
             let relativePath = rawFilename;
             const isHeader = rawFilename.endsWith('.h');
@@ -92,14 +124,26 @@ app.post('/compile', (req, res) => {
         }
 
         console.log(`[${jobId}] Compiling project...`);
-        execSync('make -f build_tools/Makefile all', { cwd: tmpDir, stdio: 'pipe' });
+        const compileOut = execSync('make -f build_tools/Makefile all', { cwd: tmpDir, stdio: 'pipe' }).toString();
 
         const binPath = path.join(tmpDir, 'build', 'firmware.bin');
         if (fs.existsSync(binPath)) {
             const fileBuffer = fs.readFileSync(binPath);
+            
+            // Extract size information
+            // Example line:    1764	   1088	   1572	   4424	   1148	build/firmware.elf
+            const sizeLine = compileOut.split('\n').find(l => l.includes('build/firmware.elf'));
+            if (sizeLine) {
+                const parts = sizeLine.trim().split(/\s+/);
+                res.setHeader('X-Size-Text', parts[0]);
+                res.setHeader('X-Size-Data', parts[1]);
+                res.setHeader('X-Size-Bss', parts[2]);
+            }
+
             console.log(`[${jobId}] Success! Sending bin (${fileBuffer.length} bytes).`);
             res.setHeader('Content-Type', 'application/octet-stream');
             res.setHeader('Content-Disposition', 'attachment; filename=firmware.bin');
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
             res.send(fileBuffer);
         } else {
             throw new Error("Build succeeded but firmware.bin not found.");
