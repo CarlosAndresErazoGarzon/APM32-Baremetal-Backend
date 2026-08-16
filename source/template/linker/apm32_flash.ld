@@ -112,6 +112,11 @@ SECTIONS
     _ebss = .;         /* define a global symbol at bss end */
     __bss_end = _ebss;
     __bss_end__ = _ebss;
+    
+    /* Agregado para arreglar incompatibilidad con arm-none-eabi-gcc 13+ y sbrk */
+    end = .;
+    _end = .;
+    __end__ = .;
   } >RAM
 
   /* User_heap_stack section, used to check that there is enough RAM left */
