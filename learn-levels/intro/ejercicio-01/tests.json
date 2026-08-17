@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "=== APM32 FIRMWARE BOOT ===\nSTATUS: SYSTEM READY\n"
+    }
+]

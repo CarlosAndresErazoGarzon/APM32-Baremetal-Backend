@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Entrada 120 -> Clamped: 100\nEntrada -15 -> Clamped: 0\nEntrada 45 -> Clamped: 45\n"
+    }
+]

@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Canales Swapped: A=2, B=1\nVoltaje Calibrado: 3.30 V\n"
+    }
+]

@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Trama Hex: 0x832A\nID Desempaquetado: 42\nCanal Desempaquetado: 3\nAlerta Desempaquetada: 1\n"
+    }
+]

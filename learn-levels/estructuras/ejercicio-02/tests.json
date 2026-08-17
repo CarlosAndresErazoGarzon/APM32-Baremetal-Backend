@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Sensor: Temperatura en Pin 5\nSensor: Luminosidad en Pin 7\n"
+    }
+]

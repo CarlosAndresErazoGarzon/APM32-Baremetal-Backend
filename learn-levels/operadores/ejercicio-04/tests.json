@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Paso 1 (Set Bit 0)   : 0x2D\nPaso 2 (Clear Bit 5) : 0x0D\nPaso 3 (Toggle Bit 3): 0x05\n"
+    }
+]

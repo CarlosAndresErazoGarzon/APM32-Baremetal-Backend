@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Elemento 0: 10\nElemento 1: 20\nElemento 2: 30\nElemento 3: 40\n"
+    }
+]

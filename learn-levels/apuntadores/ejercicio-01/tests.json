@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Valor Inicial: 42\nValor Modificado: 100\n"
+    }
+]

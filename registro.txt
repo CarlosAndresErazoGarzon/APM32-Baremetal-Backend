@@ -1,0 +1,2 @@
+Registro 1: OK
+Registro 2: OK

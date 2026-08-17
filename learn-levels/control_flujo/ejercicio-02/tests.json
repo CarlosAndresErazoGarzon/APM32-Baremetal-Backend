@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "ADC 650: Nivel MEDIO\nADC 250: Nivel BAJO\nADC 900: Nivel ALTO\n"
+    }
+]

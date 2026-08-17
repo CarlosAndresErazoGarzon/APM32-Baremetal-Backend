@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "T: 1500 ms | Bateria: 85% | Alerta: SI\n"
+    }
+]

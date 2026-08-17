@@ -1,0 +1,3 @@
+[
+    { "stdin": "", "expectedStdout": "[LED] transicion ejecutada\n[MOTOR] transicion ejecutada\n[LED] transicion ejecutada\nLED estado final: A\nMOTOR estado final: B\n" }
+]

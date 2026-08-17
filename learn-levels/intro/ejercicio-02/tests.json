@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "ID: 12\nCanal: B\nVoltaje: 3.300000 V\n"
+    }
+]

@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "T-menos: 5 s\nT-menos: 4 s\nT-menos: 3 s\nT-menos: 2 s\nT-menos: 1 s\nIgnicion!\n"
+    }
+]

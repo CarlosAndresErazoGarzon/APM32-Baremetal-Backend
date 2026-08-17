@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Paquete procesado: 10\nPaquete procesado: 20\nFin de transmision detectado.\n"
+    }
+]

@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "AND: 0x05\nOR : 0x5F\nXOR: 0x5A\nSHL: 0x3C\n"
+    }
+]

@@ -1,0 +1,2 @@
+Inicio del Sistema
+ID Dispositivo: 101

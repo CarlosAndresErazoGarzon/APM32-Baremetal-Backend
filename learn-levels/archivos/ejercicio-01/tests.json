@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Archivo log.txt creado exitosamente.\n"
+    }
+]

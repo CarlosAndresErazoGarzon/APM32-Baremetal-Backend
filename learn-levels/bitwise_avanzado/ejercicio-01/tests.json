@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "TX_READY: ACTIVO\nRX_READY: ACTIVO\nERROR: ACTIVO\n"
+    }
+]

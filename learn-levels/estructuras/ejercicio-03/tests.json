@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Sensor Pico: ID 2 con 31.80 C\n"
+    }
+]

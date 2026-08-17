@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Registro 1: OK\nRegistro 2: OK\n"
+    }
+]

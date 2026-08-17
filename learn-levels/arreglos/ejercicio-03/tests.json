@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Fila 0: 60\nFila 1: 150\nFila 2: 240\nDiagonal Principal: 150\n"
+    }
+]

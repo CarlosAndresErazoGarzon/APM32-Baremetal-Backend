@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Muestra 1: 1\nMuestra 2: 3\nMuestra 3: 5\nMuestra 4: 7\nMuestra 5: 9\nSuma Total: 25\n"
+    }
+]

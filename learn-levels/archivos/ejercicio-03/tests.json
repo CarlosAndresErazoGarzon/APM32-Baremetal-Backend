@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Config: IP=192.168.1.50\nConfig: PUERTO=8080\nConfig: MODO=AUTO\n"
+    }
+]

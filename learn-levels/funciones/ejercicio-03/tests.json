@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Evento detectado: pulso #1\nEvento detectado: pulso #2\nEvento detectado: pulso #3\n"
+    }
+]

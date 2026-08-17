@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Temp OK: 1\nHumedad OK: 1\nSistema Seguro: 1\n"
+    }
+]

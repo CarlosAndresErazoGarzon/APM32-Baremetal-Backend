@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Sensor [101] | Estado: A | Lectura: 3.30V (Hex: 0x65)\n"
+    }
+]

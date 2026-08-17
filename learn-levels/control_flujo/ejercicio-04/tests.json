@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Semaforo [V]: Siga Adelante\nSemaforo [A]: Precaucion\nSemaforo [R]: Pare Total\nSemaforo [Z]: Estado Invalido\n"
+    }
+]

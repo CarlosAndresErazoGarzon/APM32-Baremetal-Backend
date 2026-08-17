@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Registro: 0x38\nPrescaler Extraido: 7\n"
+    }
+]

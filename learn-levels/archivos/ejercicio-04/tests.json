@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Datos leidos: 5\nSuma: 150\nPromedio: 30.00\n"
+    }
+]

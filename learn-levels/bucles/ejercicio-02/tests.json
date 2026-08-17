@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Paso 1: 0.75 V\nPaso 2: 1.50 V\nPaso 3: 2.25 V\nPaso 4: 3.00 V\nVoltaje Estable Alcanzado!\n"
+    }
+]

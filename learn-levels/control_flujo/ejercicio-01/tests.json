@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Temp: 32.50 C -> Alerta: Ventilador ON\nTemp: 22.00 C -> Normal: Ventilador OFF\n"
+    }
+]

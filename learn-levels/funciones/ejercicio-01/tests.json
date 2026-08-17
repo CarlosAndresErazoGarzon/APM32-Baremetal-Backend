@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "25.00 C = 77.00 F\nPotencia: 0.66 W\n"
+    }
+]

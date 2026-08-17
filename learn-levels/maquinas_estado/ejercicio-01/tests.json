@@ -1,0 +1,3 @@
+[
+    { "stdin": "", "expectedStdout": "LED: ON\nLED: OFF\nLED: ON\nLED: OFF\n" }
+]

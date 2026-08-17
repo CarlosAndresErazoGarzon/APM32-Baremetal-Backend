@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Comando [S]: Iniciar Motor\nComando [R]: Reiniciar Sistema\nComando [X]: Desconocido\n"
+    }
+]

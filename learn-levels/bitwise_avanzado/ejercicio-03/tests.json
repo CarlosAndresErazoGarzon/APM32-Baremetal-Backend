@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Config Original: 0xB2\nConfig Modificada: 0xBA\n"
+    }
+]

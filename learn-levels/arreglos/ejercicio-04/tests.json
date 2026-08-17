@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Original: APM32\nInvertido: 23MPA\n"
+    }
+]

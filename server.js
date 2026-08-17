@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const crypto = require('crypto');
+const { runLevel } = require('./learnRunner');
 
 const app = express();
 app.use(cors({
@@ -156,6 +157,24 @@ app.post('/compile', (req, res) => {
         if (fs.existsSync(tmpDir)) {
             execSync(`rm -rf "${tmpDir}"`);
         }
+    }
+});
+
+// Learn mode: compiles + RUNS plain host C (not ARM firmware) and grades it
+// against a level's expected stdout. See learnRunner.js for the sandboxing.
+app.post('/learn/run', async (req, res) => {
+    const { levelId, code } = req.body;
+
+    if (!levelId || typeof code !== 'string') {
+        return res.status(400).json({ error: 'levelId and code are required' });
+    }
+
+    try {
+        const result = await runLevel(levelId, code);
+        res.json(result);
+    } catch (err) {
+        console.error('[learn/run]', err.message);
+        res.status(400).json({ error: err.message });
     }
 });
 

@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Sensor ID: 101 | Canal: A | Voltaje: 3.25 V\n"
+    }
+]

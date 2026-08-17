@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Antes  : Sensor [101] = 2.80 V\nDespues: Sensor [101] = 3.30 V\n"
+    }
+]
