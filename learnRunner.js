@@ -107,6 +107,273 @@ function runProcess({ cmd, args, cwd, stdin, timeoutMs, ulimit }) {
     });
 }
 
+// Runs a raw shell command line (e.g. "gcc main.c -o prog && ./prog") under
+// a real /bin/sh -c, unlike runProcess()'s ulimit path which execs a fixed
+// argv and only uses the shell as a vehicle for the ulimit prefix. This one
+// needs the shell's own operators (&&, pipes, custom gcc flags the student
+// typed) to actually mean something -- it's the backing for Playground's
+// manual "terminal" tab. Same sandboxing envelope as runProcess(): whitelisted
+// env, wall-clock timeout, and (when SANDBOX_AVAILABLE) the unprivileged
+// learnrunner uid/gid + ulimit. Not a materially bigger risk than the C
+// execution this app already does unsandboxed-beyond-ulimit: a student's C
+// program can already `system()` or open sockets from inside runArbitrary();
+// this just skips the compile step for the same jail.
+function runShellCommand({ command, cwd, stdin, timeoutMs }) {
+    return new Promise(resolve => {
+        const ids = getRunnerIds();
+        // TERM matters here (unlike runProcess()'s compile/run paths) --
+        // this is the one place a student can type ncurses-ish commands
+        // like `clear`/`tput`, which error out on a missing TERM instead
+        // of just doing nothing.
+        const env = { PATH: '/usr/bin:/bin', TERM: 'xterm' };
+        const ulimit = 'ulimit -v 131072 -t 5 -f 2048 -u 16';
+        const script = SANDBOX_AVAILABLE ? `${ulimit}; ${command}` : command;
+
+        const child = spawn('/bin/sh', ['-c', script], {
+            cwd,
+            env,
+            timeout: timeoutMs,
+            killSignal: 'SIGKILL',
+            ...(ids ? { uid: ids.uid, gid: ids.gid } : {}),
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        child.on('error', err => {
+            resolve({ stdout, stderr: stderr + '\n' + err.message, code: -1, timedOut: false });
+        });
+
+        child.stdout.on('data', d => { stdout += d; });
+        child.stderr.on('data', d => { stderr += d; });
+
+        if (stdin !== undefined && child.stdin) {
+            child.stdin.on('error', () => {});
+            child.stdin.write(stdin);
+            child.stdin.end();
+        } else if (child.stdin) {
+            child.stdin.end();
+        }
+
+        child.on('close', (code, signal) => {
+            const timedOut = signal === 'SIGKILL' || signal === 'SIGTERM';
+            resolve({ stdout, stderr, code, timedOut });
+        });
+    });
+}
+
+// Recursively lists every file under `dir`, returned as paths relative to
+// `dir` (posix-style, since these get passed straight to gcc as args).
+function listFilesRecursive(dir, base = dir) {
+    let out = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            out = out.concat(listFilesRecursive(full, base));
+        } else {
+            out.push(path.relative(base, full));
+        }
+    }
+    return out;
+}
+
+// Creates a throwaway sandbox dir under /tmp, writes `files` (plain utf8
+// text) and `binaryFiles` (base64 -- compiled executables carried forward
+// across separate terminal commands, see execCommand()) into it (rejecting
+// path traversal/absolute paths), and chowns the whole tree to the
+// unprivileged learnrunner uid/gid when sandboxed. Shared by runArbitrary()
+// and execCommand() -- both need the exact same "materialize the student's
+// files into a real, disposable directory" step before spawning anything
+// into it.
+function createJobDir(prefix, files, binaryFiles) {
+    const jobId = crypto.randomBytes(8).toString('hex');
+    const jobDir = path.join('/tmp', `${prefix}_${jobId}`);
+
+    fs.mkdirSync(jobDir, { recursive: true, mode: 0o700 });
+
+    const writeEntry = (relPath, buf, executable) => {
+        // This write happens before the unprivileged uid is dropped (that
+        // only applies to whatever gets spawned into jobDir afterward), so
+        // it runs with the parent Node process's own privileges and must
+        // not escape jobDir.
+        const normalized = path.normalize(relPath);
+        if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
+            fs.rmSync(jobDir, { recursive: true, force: true });
+            throw new Error(`Invalid file path: ${relPath}`);
+        }
+        const fullPath = path.join(jobDir, normalized);
+        fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+        fs.writeFileSync(fullPath, buf);
+        // writeFileSync's default mode doesn't preserve the execute bit --
+        // a compiled binary written back from a previous command's
+        // outputFiles needs it restored, or `./test` fails with EACCES
+        // even though the file is right there.
+        if (executable) fs.chmodSync(fullPath, 0o755);
+    };
+
+    for (const [relPath, content] of Object.entries(files)) {
+        writeEntry(relPath, content || '', false);
+    }
+    if (binaryFiles) {
+        for (const [relPath, base64Content] of Object.entries(binaryFiles)) {
+            writeEntry(relPath, Buffer.from(base64Content, 'base64'), true);
+        }
+    }
+
+    const ids = getRunnerIds();
+    if (ids) {
+        // chown the whole tree (dir + every written file), not just the
+        // top-level dir -- there can be nested subdirectories.
+        const chownRecursive = (p) => {
+            fs.chownSync(p, ids.uid, ids.gid);
+            if (fs.statSync(p).isDirectory()) {
+                for (const entry of fs.readdirSync(p)) {
+                    chownRecursive(path.join(p, entry));
+                }
+            }
+        };
+        chownRecursive(jobDir);
+    }
+
+    return jobDir;
+}
+
+// Round-trip: a program that does fopen("x", "w") (or a shell command that
+// does `> x`) writes into a jobDir that's about to be deleted -- read every
+// file back so the caller can diff it against what it submitted and merge
+// anything created/changed forward. Splits into two buckets:
+//   - outputFiles: real text (utf8, no null byte) -- merged into the
+//     visible file manager (a student's fopen("log.txt","w") case).
+//   - binaryFiles: everything else (compiled ELF/Mach-O executables, other
+//     genuinely binary output), base64 -- NOT shown in the file manager
+//     (it'd just render as garbage), but still carried forward so
+//     execCommand()'s caller can feed it back into the NEXT command's
+//     jobDir. Without this, "gcc main.c -o test" in one command followed
+//     by "./test" in a separate one would fail with "No such file" --  the
+//     binary existed only inside the first command's now-deleted jobDir.
+function readJobFilesBack(jobDir) {
+    const outputFiles = {};
+    const binaryFiles = {};
+    for (const f of listFilesRecursive(jobDir)) {
+        if (f === 'a.out') continue;
+        try {
+            const buf = fs.readFileSync(path.join(jobDir, f));
+            // A compiled ELF/Mach-O binary almost always has a null byte in
+            // its first few bytes, real text essentially never does --
+            // cheap enough of a filter to sort the two buckets.
+            if (buf.includes(0)) {
+                binaryFiles[f] = buf.toString('base64');
+            } else {
+                outputFiles[f] = buf.toString('utf8');
+            }
+        } catch { /* unreadable (permissions) -- skip it */ }
+    }
+    return { outputFiles, binaryFiles };
+}
+
+// Playground: compile+run an ARBITRARY multi-file plain-C project -- no
+// levelId, no tests.json, no expectedStdout comparison. Reuses runProcess()
+// and the exact sandboxing runLevel() already has (same risk class: this
+// executes untrusted, arbitrary user code).
+async function runArbitrary(files, stdin) {
+    if (!files || typeof files !== 'object' || Object.keys(files).length === 0) {
+        throw new Error('files is required');
+    }
+
+    const jobDir = createJobDir('playground_build', files);
+
+    try {
+        const allFiles = listFilesRecursive(jobDir);
+        const sourceFiles = allFiles.filter(f => f.endsWith('.c'));
+        if (sourceFiles.length === 0) {
+            return { success: false, stage: 'compile', stderr: 'No .c files to compile.' };
+        }
+
+        // A quote-form #include only searches the including file's own
+        // directory by default -- a student organizing files into src/inc
+        // folders (main.c in src/ including a header from inc/) would hit
+        // "undeclared function" errors otherwise. -I every directory that
+        // actually has a file in it, same reasoning the real ARM Makefile
+        // already uses (-I$(INC_DIR) -I$(SDK_INC_DIR)).
+        const includeDirs = new Set(['.']);
+        for (const f of allFiles) {
+            const dir = path.dirname(f);
+            if (dir !== '.') includeDirs.add(dir);
+        }
+        const includeFlags = [...includeDirs].map(d => `-I${d}`);
+
+        const compileResult = await runProcess({
+            cmd: 'gcc',
+            args: ['-O0', '-Wall', '-std=c11', ...includeFlags, ...sourceFiles, '-o', 'a.out'],
+            cwd: jobDir,
+            timeoutMs: 5000,
+        });
+
+        if (compileResult.code !== 0) {
+            return { success: false, stage: 'compile', stderr: compileResult.stderr };
+        }
+
+        const runResult = await runProcess({
+            cmd: './a.out',
+            args: [],
+            cwd: jobDir,
+            stdin: stdin || '',
+            timeoutMs: 5000,
+            ulimit: 'ulimit -v 131072 -t 5 -f 2048 -u 16',
+        });
+
+        const { outputFiles } = readJobFilesBack(jobDir);
+        return {
+            success: true,
+            stage: 'run',
+            stdout: runResult.stdout,
+            stderr: runResult.stderr,
+            code: runResult.code,
+            timedOut: runResult.timedOut,
+            outputFiles,
+        };
+    } finally {
+        await fs.promises.rm(jobDir, { recursive: true, force: true }).catch(() => {});
+    }
+}
+
+// Playground's manual "terminal" tab: runs a raw shell command line the
+// student typed (e.g. "gcc main.c -o prog && ./prog", or just "./prog") in
+// the same kind of disposable sandbox as runArbitrary(), seeded from the
+// current file manager state PLUS `binaryFiles` -- compiled executables the
+// caller carried forward from a PREVIOUS command's response (see
+// ConsoleUI.js), since each command gets its own fresh, disposable jobDir
+// and there's no real persistent shell/cwd otherwise. Round-trips both
+// buckets back out so the caller can keep carrying binaries forward and
+// merge text output into the file manager.
+async function execCommand(files, command, stdin, binaryFiles) {
+    if (!files || typeof files !== 'object') {
+        throw new Error('files is required');
+    }
+    if (typeof command !== 'string' || command.trim() === '') {
+        throw new Error('command is required');
+    }
+
+    const jobDir = createJobDir('playground_exec', files, binaryFiles);
+
+    try {
+        const result = await runShellCommand({ command, cwd: jobDir, stdin: stdin || '', timeoutMs: 8000 });
+        const { outputFiles, binaryFiles: newBinaryFiles } = readJobFilesBack(jobDir);
+
+        return {
+            success: true,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            code: result.code,
+            timedOut: result.timedOut,
+            outputFiles,
+            binaryFiles: newBinaryFiles,
+        };
+    } finally {
+        await fs.promises.rm(jobDir, { recursive: true, force: true }).catch(() => {});
+    }
+}
+
 async function runLevel(levelId, code) {
     const tests = loadTests(levelId);
 
@@ -164,4 +431,4 @@ async function runLevel(levelId, code) {
     }
 }
 
-module.exports = { runLevel };
+module.exports = { runLevel, runArbitrary, execCommand };

@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "CFGLOW: 0x44484444\nODATA:  0x00000010\n"
+    }
+]

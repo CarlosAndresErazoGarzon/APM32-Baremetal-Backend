@@ -1,16 +1,34 @@
 require('dotenv').config();
 const express = require('express');
+const compression = require('compression');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const crypto = require('crypto');
-const { runLevel } = require('./learnRunner');
+const { runLevel, runArbitrary, execCommand } = require('./learnRunner');
 
 const app = express();
+// Load-bearing for frontend/vendor/wasm-clang/ (~60MB uncompressed: clang
+// + lld + sysroot.tar) -- gzip brings that down to what the browser
+// actually needs to transfer, same order of magnitude as loading it from
+// the upstream demo's own (gzip'd) GitHub Pages hosting. Explicit
+// req.path check rather than trusting compression's own default filter:
+// clang/lld/sysroot.tar have no file extension, so express.static serves
+// them as application/octet-stream, and whether the 'compressible' package
+// (which the default filter defers to) classifies that MIME type as
+// compressible has changed across its own versions -- this app has
+// observed it go both ways. Forcing it explicitly for this one path avoids
+// silently losing compression again on some future `npm update`.
+app.use(compression({
+    filter: (req, res) => {
+        return req.path.startsWith('/vendor/wasm-clang/') || compression.filter(req, res);
+    }
+}));
 app.use(cors({
     exposedHeaders: ['X-Size-Text', 'X-Size-Data', 'X-Size-Bss']
 }));
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
 
@@ -178,7 +196,59 @@ app.post('/learn/run', async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`APM32 Compiler API running on http://localhost:${PORT}`);
+// Playground mode: compile + run an ARBITRARY multi-file plain-C project --
+// no curriculum levelId, no expectedStdout grading, just raw stdout/stderr.
+// Same sandboxing as /learn/run (see learnRunner.js's runArbitrary()).
+app.post('/playground/run', async (req, res) => {
+    const { files, stdin } = req.body;
+
+    if (!files || typeof files !== 'object' || Object.keys(files).length === 0) {
+        return res.status(400).json({ error: 'files is required' });
+    }
+
+    try {
+        const result = await runArbitrary(files, stdin);
+        res.json(result);
+    } catch (err) {
+        console.error('[playground/run]', err.message);
+        res.status(400).json({ error: err.message });
+    }
 });
+
+// Playground's manual "terminal" tab: runs a raw command line the student
+// typed themselves (gcc with whatever flags, chained with &&, etc.) instead
+// of the fixed compile+run RUN button does. Same sandbox, see
+// learnRunner.js's execCommand().
+app.post('/playground/exec', async (req, res) => {
+    const { files, command, stdin, binaryFiles } = req.body;
+
+    if (!files || typeof files !== 'object') {
+        return res.status(400).json({ error: 'files is required' });
+    }
+    if (typeof command !== 'string' || command.trim() === '') {
+        return res.status(400).json({ error: 'command is required' });
+    }
+
+    try {
+        const result = await execCommand(files, command, stdin, binaryFiles);
+        res.json(result);
+    } catch (err) {
+        console.error('[playground/exec]', err.message);
+        res.status(400).json({ error: err.message });
+    }
+});
+
+const PORT = process.env.PORT || 3000;
+// require.main check: only auto-listen when this file is run directly
+// (`node server.js`) -- normal `node server.js` behavior is unaffected.
+// backend/test/helpers/scratchServer.js instead requires this module and
+// calls app.listen(0) itself, so every test run gets a real OS-assigned
+// ephemeral port and can never collide with the user's own 3000 (or with
+// another test file's server running in parallel).
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`APM32 Compiler API running on http://localhost:${PORT}`);
+    });
+}
+
+module.exports = app;

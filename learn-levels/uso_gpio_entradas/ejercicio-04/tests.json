@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Lectura 4: LED -> 0x00000004\nLectura 9: LED -> 0x00000000\n"
+    }
+]

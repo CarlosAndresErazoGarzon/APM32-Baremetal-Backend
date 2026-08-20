@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Toggle 1 -> ODATA: 0x00000004\nToggle 2 -> ODATA: 0x00000000\nToggle 3 -> ODATA: 0x00000004\nToggle 4 -> ODATA: 0x00000000\nToggle 5 -> ODATA: 0x00000004\n"
+    }
+]

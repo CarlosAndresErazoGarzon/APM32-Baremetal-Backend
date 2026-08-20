@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "ODATA tras encender: 0x00000004\nODATA tras apagar:   0x00000000\n"
+    }
+]

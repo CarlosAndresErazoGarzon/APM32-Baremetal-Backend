@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "RCM->APB2CLKEN: 0x00000008\nGPIOB->CFGLOW: 0x44444344\n"
+    }
+]

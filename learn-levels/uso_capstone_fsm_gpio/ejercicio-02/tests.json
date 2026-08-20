@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Lectura 6: Estado 1 | ODATA 0x00000020\nLectura 11: Estado 0 | ODATA 0x00000000\n"
+    }
+]

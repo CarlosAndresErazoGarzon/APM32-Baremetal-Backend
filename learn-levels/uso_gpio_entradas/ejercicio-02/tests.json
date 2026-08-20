@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Muestra 0: LIBRE\nMuestra 1: PRESIONADO\nMuestra 2: LIBRE\nMuestra 3: PRESIONADO\nMuestra 4: PRESIONADO\n"
+    }
+]

@@ -1,0 +1,6 @@
+[
+    {
+        "stdin": "",
+        "expectedStdout": "Evento 0 -> Estado: 1 | ODATA: 0x00000020\nEvento 1 -> Estado: 1 | ODATA: 0x00000020\nEvento 2 -> Estado: 0 | ODATA: 0x00000000\nEvento 3 -> Estado: 0 | ODATA: 0x00000000\nEvento 4 -> Estado: 1 | ODATA: 0x00000020\n"
+    }
+]
