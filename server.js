@@ -22,7 +22,14 @@ const app = express();
 // silently losing compression again on some future `npm update`.
 app.use(compression({
     filter: (req, res) => {
-        return req.path.startsWith('/vendor/wasm-clang/') || compression.filter(req, res);
+        if (req.path.startsWith('/vendor/wasm-clang/')) return true;
+        // The .vsix under /downloads/ is already a zip container -- gzip/
+        // brotli-ing it again on every download burns CPU for a fraction
+        // of a percent of size, and it also falls under the same
+        // application/octet-stream MIME type as the wasm-clang assets
+        // above, which the default filter doesn't reliably skip either.
+        if (req.path.startsWith('/downloads/')) return false;
+        return compression.filter(req, res);
     }
 }));
 app.use(cors({

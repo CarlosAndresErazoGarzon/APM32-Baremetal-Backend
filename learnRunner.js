@@ -67,9 +67,14 @@ function runProcess({ cmd, args, cwd, stdin, timeoutMs, ulimit }) {
         let spawnArgs = args;
         if (ulimit && SANDBOX_AVAILABLE) {
             // ulimit is a shell builtin, not a standalone executable -- has to
-            // run inside a shell that then execs the real command.
+            // run inside a shell that then execs the real command. Needs to
+            // be bash specifically, not the image's default /bin/sh (dash):
+            // dash's ulimit builtin has no -u (max user processes) at all
+            // ("Illegal option -u", confirmed against the real node:18-slim
+            // image), which would silently drop fork-bomb protection. Bash
+            // is already present in that base image, no new dependency.
             const quoted = [cmd, ...args].map(a => `'${a.replace(/'/g, `'\\''`)}'`).join(' ');
-            spawnCmd = '/bin/sh';
+            spawnCmd = '/bin/bash';
             spawnArgs = ['-c', `${ulimit}; exec ${quoted}`];
         }
 
@@ -108,8 +113,10 @@ function runProcess({ cmd, args, cwd, stdin, timeoutMs, ulimit }) {
 }
 
 // Runs a raw shell command line (e.g. "gcc main.c -o prog && ./prog") under
-// a real /bin/sh -c, unlike runProcess()'s ulimit path which execs a fixed
-// argv and only uses the shell as a vehicle for the ulimit prefix. This one
+// a real shell -c (bash when sandboxed, plain /bin/sh otherwise -- see the
+// ulimit comment below for why), unlike runProcess()'s ulimit path which
+// execs a fixed argv and only uses the shell as a vehicle for the ulimit
+// prefix. This one
 // needs the shell's own operators (&&, pipes, custom gcc flags the student
 // typed) to actually mean something -- it's the backing for Playground's
 // manual "terminal" tab. Same sandboxing envelope as runProcess(): whitelisted
@@ -126,10 +133,18 @@ function runShellCommand({ command, cwd, stdin, timeoutMs }) {
         // like `clear`/`tput`, which error out on a missing TERM instead
         // of just doing nothing.
         const env = { PATH: '/usr/bin:/bin', TERM: 'xterm' };
-        const ulimit = 'ulimit -v 131072 -t 5 -f 2048 -u 16';
+        // One `ulimit -X value` per call, semicolon-chained -- the bash-style
+        // multi-flag form in one invocation ("ulimit -v 131072 -t 5 -f 2048
+        // -u 16") is invalid under a strict POSIX ulimit and fails with
+        // "too many arguments". Only takes effect when sandboxed (below,
+        // spawnShell is bash then, whose ulimit builtin supports every flag
+        // used here, unlike dash's -- see runProcess()'s ulimit branch for
+        // why dash specifically can't be used).
+        const ulimit = 'ulimit -v 131072; ulimit -t 5; ulimit -f 2048; ulimit -u 16';
         const script = SANDBOX_AVAILABLE ? `${ulimit}; ${command}` : command;
+        const spawnShell = SANDBOX_AVAILABLE ? '/bin/bash' : '/bin/sh';
 
-        const child = spawn('/bin/sh', ['-c', script], {
+        const child = spawn(spawnShell, ['-c', script], {
             cwd,
             env,
             timeout: timeoutMs,
@@ -319,7 +334,7 @@ async function runArbitrary(files, stdin) {
             cwd: jobDir,
             stdin: stdin || '',
             timeoutMs: 5000,
-            ulimit: 'ulimit -v 131072 -t 5 -f 2048 -u 16',
+            ulimit: 'ulimit -v 131072; ulimit -t 5; ulimit -f 2048; ulimit -u 16',
         });
 
         const { outputFiles } = readJobFilesBack(jobDir);
@@ -410,7 +425,7 @@ async function runLevel(levelId, code) {
                 cwd: jobDir,
                 stdin: test.stdin || '',
                 timeoutMs: 3000,
-                ulimit: 'ulimit -v 131072 -t 5 -f 2048 -u 16',
+                ulimit: 'ulimit -v 131072; ulimit -t 5; ulimit -f 2048; ulimit -u 16',
             });
 
             const passed = !runResult.timedOut && normalize(runResult.stdout) === normalize(test.expectedStdout);
