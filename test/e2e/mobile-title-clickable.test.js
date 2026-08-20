@@ -35,6 +35,13 @@ test.afterAll(async () => {
 });
 
 test('the mode-switcher buttons stay clickable on a mobile viewport regardless of which random title font loads', async ({ browser }) => {
+    // 6 full page loads in sequence is legitimately slow (measured
+    // 2.5-6.5s each depending on machine load), and this test's own loop
+    // was tight against Playwright's 30s default -- occasional real
+    // timeouts under parallel-worker contention, not a product bug (no
+    // console/page errors on any run, every click succeeded once given
+    // enough time). Room to breathe instead of trimming the coverage.
+    test.setTimeout(60_000);
     for (let i = 0; i < 6; i++) {
         const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
         await page.goto(`${scratch.baseUrl}/index.html`, { waitUntil: 'networkidle' });

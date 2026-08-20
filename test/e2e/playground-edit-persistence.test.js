@@ -17,6 +17,11 @@
  * which had the identical bug and the identical fix -- removed along with
  * that button once the terminal became the only way to run things in
  * Playground.)
+ *
+ * The Clear button (below) hit the exact same root cause through a
+ * different door: it also emits on playgroundFsBloc (setBinaryNames([])),
+ * with no compile involved at all -- reported separately, fixed the same
+ * way.
  */
 const { test, expect } = require('playwright/test');
 const { startScratchServer } = require('../helpers/scratchServer');
@@ -60,6 +65,23 @@ test('editing main.c and compiling it via the manual terminal does not revert th
         () => document.getElementById('consoleOutput')?.innerText.includes('exit code'),
         { timeout: 10000 }
     );
+
+    expect(await editorValue(page)).toBe(EDITED_CONTENT);
+});
+
+test('editing main.c and pressing the terminal\'s Clear button does not revert the edit', async ({ page }) => {
+    // Same bug, same fix, different trigger: a real user hit this by
+    // editing a file and clicking Clear before ever running a command --
+    // no compile involved, so setBinaryNames([]) was the only emit on
+    // playgroundFsBloc, and that alone was enough to trip the self-heal.
+    await page.goto(`${scratch.baseUrl}/index.html`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(1000);
+    await editMainC(page);
+
+    await page.click('#consoleTabBtn');
+    await page.waitForTimeout(300);
+    await page.click('#consoleClearBtn');
+    await page.waitForTimeout(300);
 
     expect(await editorValue(page)).toBe(EDITED_CONTENT);
 });
