@@ -4,21 +4,28 @@
  * dentro del editor y me devuelve al top del archivo" -- the cursor jumps
  * to line 1 mid-typing.
  *
- * Root cause: FileSystemBloc.saveProjectToCloud() (fired by the Autosave
- * checkbox's debounce, or the manual SAVE CLOUD button) snapshotted the
- * editor content BEFORE the Firestore write, then reused that same stale
- * snapshot in the local virtualFS update AFTER the write's real,
+ * Root cause (original): FileSystemBloc.saveProjectToCloud() snapshotted
+ * the editor content BEFORE the Firestore write, then reused that same
+ * stale snapshot in the local virtualFS update AFTER the write's real,
  * unbounded-latency network round-trip finished. If the student resumed
  * typing during that window, EditorUI.render()'s stale-content check saw
- * the live editor disagree with the (stale) virtualFS and called
- * Monaco's setValue() -- which unconditionally resets the cursor to the
- * top of the file regardless of whether the content it's setting even
- * differs. Fixed by re-reading the editor content fresh (via a getter
- * function, not a pre-evaluated string) right before that final emit.
+ * the live editor disagree with the (stale) virtualFS and called Monaco's
+ * setValue() -- which unconditionally resets the cursor to the top of the
+ * file regardless of whether the content it's setting even differs.
+ *
+ * Current design: the editor is no longer the thing saveProjectToCloud()
+ * has to reconcile against at all. EditorUI.onDidChangeModelContent() now
+ * pushes every keystroke into state.virtualFS synchronously (see
+ * EditorUI.js), so virtualFS is always whatever's newest -- including
+ * anything typed WHILE a save's network round-trip is still in flight --
+ * and saveProjectToCloud()'s own trailing emit no longer touches virtualFS
+ * at all (see FileSystemBloc.js), so it has nothing stale left to write
+ * back over newer keystrokes.
  *
  * Simulates real network latency with a deliberately slow fake Firestore
- * write, typing more content while it's "in flight" -- exactly the
- * reported scenario.
+ * write, then simulates the student resuming typing while it's "in
+ * flight" the same way EditorUI would: a synchronous updateFileContent()
+ * call, not a getter saveProjectToCloud() reads later.
  */
 const { test, expect } = require('playwright/test');
 const { startScratchServer } = require('../helpers/scratchServer');
@@ -41,10 +48,7 @@ test('resuming typing while a cloud save is still in flight does not revert the 
         const bloc = new FileSystemBloc();
         const currentFile = bloc.state.currentFile;
 
-        // Simulates the editor's live content -- a plain mutable string
-        // the getter always reads fresh, exactly like editorUI.getContent().
-        let liveEditorContent = 'ORIGINAL';
-        const getEditorContent = () => liveEditorContent;
+        bloc.updateFileContent(currentFile, 'ORIGINAL');
 
         const fakeDb = {
             collection: () => ({
@@ -56,20 +60,18 @@ test('resuming typing while a cloud save is still in flight does not revert the 
         window.firebase = { firestore: { FieldValue: { serverTimestamp: () => 'stub' } } };
         const fakeUser = { uid: 'u1', email: 'u1@example.com' };
 
-        const savePromise = bloc.saveProjectToCloud(fakeDb, fakeUser, getEditorContent);
+        const savePromise = bloc.saveProjectToCloud(fakeDb, fakeUser);
 
-        // The student resumes typing WHILE the save is still in flight.
+        // The student resumes typing WHILE the save is still in flight --
+        // same synchronous call EditorUI.onDidChangeModelContent() makes
+        // on every keystroke.
         await new Promise(r => setTimeout(r, 100));
-        liveEditorContent = 'ORIGINAL PLUS NEW TYPING';
+        bloc.updateFileContent(currentFile, 'ORIGINAL PLUS NEW TYPING');
 
         await savePromise;
 
-        return {
-            virtualFSAfterSave: bloc.state.virtualFS[currentFile],
-            liveEditorContent,
-        };
+        return { virtualFSAfterSave: bloc.state.virtualFS[currentFile] };
     });
 
     expect(result.virtualFSAfterSave).toBe('ORIGINAL PLUS NEW TYPING');
-    expect(result.virtualFSAfterSave).toBe(result.liveEditorContent);
 });

@@ -213,26 +213,56 @@ function createJobDir(prefix, files, binaryFiles) {
         // not escape jobDir.
         const normalized = path.normalize(relPath);
         if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
-            fs.rmSync(jobDir, { recursive: true, force: true });
             throw new Error(`Invalid file path: ${relPath}`);
         }
         const fullPath = path.join(jobDir, normalized);
-        fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-        fs.writeFileSync(fullPath, buf);
-        // writeFileSync's default mode doesn't preserve the execute bit --
-        // a compiled binary written back from a previous command's
-        // outputFiles needs it restored, or `./test` fails with EACCES
-        // even though the file is right there.
-        if (executable) fs.chmodSync(fullPath, 0o755);
+        try {
+            fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+            fs.writeFileSync(fullPath, buf);
+            // writeFileSync's default mode doesn't preserve the execute
+            // bit -- a compiled binary written back from a previous
+            // command's outputFiles needs it restored, or `./test` fails
+            // with EACCES even though the file is right there.
+            if (executable) fs.chmodSync(fullPath, 0o755);
+        } catch (err) {
+            if (err.code === 'EEXIST' && err.syscall === 'mkdir') {
+                // A real reported bug: virtualFS has no separate "this is
+                // a folder" marker (folders are purely derived from '/'
+                // -prefixes of its keys, see SidebarUI.buildTree()), so a
+                // plain file and a folder could end up sharing the same
+                // name (e.g. a stray file literally called "fun_est"
+                // alongside "fun_est/estructuras.c") -- this is exactly
+                // where that surfaces: mkdir can't create a directory
+                // where a file already sits. Client-side now has guards
+                // preventing this from being CREATED (see
+                // FileSystemBloc.js's fileBlockingPath/folderExistsAt),
+                // but this message is what any already-corrupted project
+                // sees until its owner renames/deletes the colliding
+                // entry -- a named, actionable error instead of a raw
+                // "EEXIST ... mkdir '...'" with no indication of what
+                // collided or what to do about it.
+                throw new Error(`Your project has a file and a folder with the same name ("${path.basename(err.path)}"). Rename or delete one of them in the file tree, then try again.`);
+            }
+            throw err;
+        }
     };
 
-    for (const [relPath, content] of Object.entries(files)) {
-        writeEntry(relPath, content || '', false);
-    }
-    if (binaryFiles) {
-        for (const [relPath, base64Content] of Object.entries(binaryFiles)) {
-            writeEntry(relPath, Buffer.from(base64Content, 'base64'), true);
+    try {
+        for (const [relPath, content] of Object.entries(files)) {
+            writeEntry(relPath, content || '', false);
         }
+        if (binaryFiles) {
+            for (const [relPath, base64Content] of Object.entries(binaryFiles)) {
+                writeEntry(relPath, Buffer.from(base64Content, 'base64'), true);
+            }
+        }
+    } catch (err) {
+        // Every throw above used to leave whatever had already been
+        // written sitting in /tmp forever (the invalid-path branch was
+        // the only one that cleaned up) -- one cleanup path for all of
+        // them now, instead of relying on each new throw site to remember it.
+        fs.rmSync(jobDir, { recursive: true, force: true });
+        throw err;
     }
 
     const ids = getRunnerIds();

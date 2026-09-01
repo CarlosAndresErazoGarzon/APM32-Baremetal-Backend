@@ -6,8 +6,10 @@
  * CLOUD (which needs an account) did. Fixed with a namespace-scoped
  * localStorage mirror in FileSystemBloc (guest bucket by default, a uid
  * bucket once signed in -- same account-isolation design as
- * LearnBloc.setNamespace()) plus a debounced app.js sync so plain typing
- * (not just a file switch) reaches it.
+ * LearnBloc.setNamespace()), which fires on every emit -- and
+ * EditorUI.onDidChangeModelContent() pushing every keystroke into the
+ * bloc synchronously (see EditorUI.js), so plain typing (not just a file
+ * switch) reaches it too.
  */
 const { test, expect } = require('playwright/test');
 const { startScratchServer } = require('../helpers/scratchServer');
@@ -27,8 +29,9 @@ async function typeIntoEditor(page, code) {
         const models = monaco.editor.getModels();
         if (models.length > 0) models[0].setValue(c);
     }, code);
-    // The app.js debounce is 800ms.
-    await page.waitForTimeout(1200);
+    // The sync to the bloc (and its localStorage mirror) is synchronous now,
+    // not debounced -- this is just settle time for other listeners.
+    await page.waitForTimeout(300);
 }
 
 test('an IDE edit survives a page reload without logging in', async ({ page }) => {
