@@ -125,6 +125,14 @@ function runProcess({ cmd, args, cwd, stdin, timeoutMs, ulimit }) {
 // execution this app already does unsandboxed-beyond-ulimit: a student's C
 // program can already `system()` or open sockets from inside runArbitrary();
 // this just skips the compile step for the same jail.
+// Unlikely-to-collide marker this appends to every script so the caller
+// can recover the shell's OWN final working directory afterward (see
+// below) -- not adversarial-proof (a student could `cat` a file containing
+// this exact line and confuse the parser), but that's the same risk
+// tolerance already accepted elsewhere in this file (e.g. the null-byte
+// heuristic readJobFilesBack() uses to tell binary output from text).
+const CWD_MARKER = '###APM32_CWD###';
+
 function runShellCommand({ command, cwd, stdin, timeoutMs }) {
     return new Promise(resolve => {
         const ids = getRunnerIds();
@@ -141,7 +149,21 @@ function runShellCommand({ command, cwd, stdin, timeoutMs }) {
         // used here, unlike dash's -- see runProcess()'s ulimit branch for
         // why dash specifically can't be used).
         const ulimit = 'ulimit -v 131072; ulimit -t 5; ulimit -f 2048; ulimit -u 16';
-        const script = SANDBOX_AVAILABLE ? `${ulimit}; ${command}` : command;
+        // `cd` only changes the *spawned shell's own* working directory,
+        // which is gone the instant this process exits -- there's no
+        // persistent shell across separate exec() calls (each gets a
+        // fresh, disposable jobDir, see createJobDir()). To make `cd`
+        // still feel like it "sticks" across commands, the command runs
+        // at the top level of THIS SAME shell (not a subshell -- a
+        // subshell's `cd` wouldn't be visible to anything after it), then
+        // this appends its own `pwd` capture printed behind a marker line
+        // so the caller can parse it back out, compute where the shell
+        // ended up relative to the job root, and hand that back to the
+        // client to send as `cwd` on the NEXT command. `$?` is captured
+        // immediately after the real command so the marker/pwd lines
+        // right after it can't clobber the exit code this reports back.
+        const withCwdCapture = `${command}\n__apm32_ec__=$?\nprintf '\\n${CWD_MARKER}:%s\\n' "$(pwd)"\nexit $__apm32_ec__`;
+        const script = SANDBOX_AVAILABLE ? `${ulimit}; ${withCwdCapture}` : withCwdCapture;
         const spawnShell = SANDBOX_AVAILABLE ? '/bin/bash' : '/bin/sh';
 
         const child = spawn(spawnShell, ['-c', script], {
@@ -156,7 +178,7 @@ function runShellCommand({ command, cwd, stdin, timeoutMs }) {
         let stderr = '';
 
         child.on('error', err => {
-            resolve({ stdout, stderr: stderr + '\n' + err.message, code: -1, timedOut: false });
+            resolve({ stdout, stderr: stderr + '\n' + err.message, code: -1, timedOut: false, finalCwd: cwd });
         });
 
         child.stdout.on('data', d => { stdout += d; });
@@ -172,7 +194,22 @@ function runShellCommand({ command, cwd, stdin, timeoutMs }) {
 
         child.on('close', (code, signal) => {
             const timedOut = signal === 'SIGKILL' || signal === 'SIGTERM';
-            resolve({ stdout, stderr, code, timedOut });
+            // Strip the marker line back out of stdout -- it's plumbing
+            // for this function's own caller, not something the student
+            // ever typed or should see in their terminal transcript.
+            let finalCwd = cwd;
+            const markerIndex = stdout.lastIndexOf(`${CWD_MARKER}:`);
+            if (markerIndex !== -1) {
+                const afterMarker = stdout.slice(markerIndex + CWD_MARKER.length + 1);
+                const newlineIndex = afterMarker.indexOf('\n');
+                const captured = (newlineIndex === -1 ? afterMarker : afterMarker.slice(0, newlineIndex)).trim();
+                if (captured) finalCwd = captured;
+                // Drop the marker line (and the blank line printf's
+                // leading \n produced ahead of it) from what the student
+                // actually sees.
+                stdout = stdout.slice(0, markerIndex).replace(/\n$/, '');
+            }
+            resolve({ stdout, stderr, code, timedOut, finalCwd });
         });
     });
 }
@@ -391,7 +428,29 @@ async function runArbitrary(files, stdin) {
 // and there's no real persistent shell/cwd otherwise. Round-trips both
 // buckets back out so the caller can keep carrying binaries forward and
 // merge text output into the file manager.
-async function execCommand(files, command, stdin, binaryFiles) {
+// Resolves the client-supplied `relCwd` (a path relative to the project
+// root, e.g. "archivos" after a previous `cd archivos`) against THIS
+// command's freshly-materialized jobDir -- never trusted blindly, since
+// it's state a previous response handed back to the client and the client
+// echoes back verbatim on the next request. Path-traversal is rejected the
+// same way writeEntry() rejects it for uploaded file paths; a directory
+// that no longer exists (deleted/renamed between commands, or simply never
+// existed) falls back to the job root instead of handing spawn() a path
+// that would make it fail with ENOENT.
+function resolveCwd(jobDir, relCwd) {
+    if (!relCwd) return jobDir;
+    const normalized = path.normalize(relCwd);
+    if (normalized.startsWith('..') || path.isAbsolute(normalized)) return jobDir;
+    const full = path.join(jobDir, normalized);
+    try {
+        if (fs.statSync(full).isDirectory()) return full;
+    } catch {
+        // Doesn't exist (anymore) -- fall through to the job root.
+    }
+    return jobDir;
+}
+
+async function execCommand(files, command, stdin, binaryFiles, cwd) {
     if (!files || typeof files !== 'object') {
         throw new Error('files is required');
     }
@@ -402,8 +461,40 @@ async function execCommand(files, command, stdin, binaryFiles) {
     const jobDir = createJobDir('playground_exec', files, binaryFiles);
 
     try {
-        const result = await runShellCommand({ command, cwd: jobDir, stdin: stdin || '', timeoutMs: 8000 });
+        const startCwd = resolveCwd(jobDir, cwd);
+        const result = await runShellCommand({ command, cwd: startCwd, stdin: stdin || '', timeoutMs: 8000 });
         const { outputFiles, binaryFiles: newBinaryFiles } = readJobFilesBack(jobDir);
+
+        // Relative to the job root, and clamped back to '' (the root) if
+        // the command somehow `cd`'d to somewhere outside it -- '..' one
+        // too many times, `cd /`, etc. -- so a client can never accumulate
+        // a cwd that would resolve outside its own sandbox on a later call
+        // (resolveCwd() would already refuse it next time regardless, but
+        // there's no reason to hand back a value that looks like it means
+        // something it can't).
+        // realpathSync both sides before comparing -- NOT optional on a Mac
+        // dev machine, where /tmp is itself a symlink to /private/tmp: the
+        // shell's own `pwd` follows that symlink and reports the physical
+        // path, while jobDir was built by joining onto the logical '/tmp',
+        // so a bare path.relative() between them produced "../private/tmp/
+        // ..." (looked like it had escaped the sandbox) even for a `cd`
+        // that stayed well inside it -- confirmed as the actual reason a
+        // `cd` that plainly worked (visible in the command's own stdout)
+        // still came back reporting cwd: ''. Linux (Cloud Run, the
+        // Dockerfile's own image) doesn't symlink /tmp, but resolving both
+        // sides makes this correct regardless of platform instead of
+        // relying on that happening not to matter there.
+        const realJobDir = fs.realpathSync(jobDir);
+        let realFinalCwd = realJobDir;
+        try {
+            realFinalCwd = fs.realpathSync(result.finalCwd || jobDir);
+        } catch {
+            // The directory the shell ended up in no longer exists by the
+            // time we get here (unusual, but not impossible) -- treat it
+            // as "back at the root" rather than throwing.
+        }
+        let relativeCwd = path.relative(realJobDir, realFinalCwd);
+        if (relativeCwd.startsWith('..') || path.isAbsolute(relativeCwd)) relativeCwd = '';
 
         return {
             success: true,
@@ -411,6 +502,7 @@ async function execCommand(files, command, stdin, binaryFiles) {
             stderr: result.stderr,
             code: result.code,
             timedOut: result.timedOut,
+            cwd: relativeCwd,
             outputFiles,
             binaryFiles: newBinaryFiles,
         };

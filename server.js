@@ -227,7 +227,7 @@ app.post('/playground/run', async (req, res) => {
 // of the fixed compile+run RUN button does. Same sandbox, see
 // learnRunner.js's execCommand().
 app.post('/playground/exec', async (req, res) => {
-    const { files, command, stdin, binaryFiles } = req.body;
+    const { files, command, stdin, binaryFiles, cwd } = req.body;
 
     if (!files || typeof files !== 'object') {
         return res.status(400).json({ error: 'files is required' });
@@ -237,7 +237,7 @@ app.post('/playground/exec', async (req, res) => {
     }
 
     try {
-        const result = await execCommand(files, command, stdin, binaryFiles);
+        const result = await execCommand(files, command, stdin, binaryFiles, cwd);
         res.json(result);
     } catch (err) {
         console.error('[playground/exec]', err.message);
