@@ -6,8 +6,7 @@
   "scripts": {
     "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "node --test test/unit/*.test.js",
-    "test:e2e": "playwright test",
-    "postinstall": "node scripts/fix-node-pty-perms.js"
+    "test:e2e": "playwright test"
   },
   "keywords": [],
   "author": "",
@@ -18,9 +17,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "multer": "^2.1.1",
-    "node-pty": "^1.1.0",
-    "ws": "^8.21.3"
+    "multer": "^2.1.1"
   },
   "devDependencies": {
     "playwright": "^1.62.1"

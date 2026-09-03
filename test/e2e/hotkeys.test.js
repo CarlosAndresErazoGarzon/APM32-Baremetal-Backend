@@ -103,31 +103,21 @@ test('"i" focuses the editor, "j" focuses the terminal input, "Escape" exits eit
     await expect(page.locator('#editor textarea')).not.toBeFocused();
 
     await page.click('#playgroundModeBtn');
-    await page.waitForTimeout(800); // pty session connects lazily
+    await page.waitForTimeout(500);
     await page.evaluate(() => document.activeElement.blur());
 
-    // The terminal's own hidden input (xterm.js listens on this textarea
-    // for every keystroke -- see ConsoleUI.js/HotkeysUI.js's
-    // focusableTerminalInput(), there's no separate command-input element
-    // anymore).
-    const termInput = page.locator('#consoleXtermMount .xterm-helper-textarea');
     await page.keyboard.press('j');
-    await expect(termInput).toBeFocused();
+    await expect(page.locator('#consoleCommandInput')).toBeFocused();
 
     // A literal backslash typed once already inside must still work
     // normally (the exact thing a Windows path or shell escape needs) --
     // 'j' itself is the letter that was chosen specifically so it never
-    // collides with a character someone would actually type here. Checked
-    // via the terminal's own visible transcript (real pty echo), not a
-    // plain <input>'s .value -- there isn't one anymore.
+    // collides with a character someone would actually type here.
     await page.keyboard.type('a\\b');
-    await page.waitForFunction(
-        () => document.getElementById('consoleXtermMount').innerText.includes('a\\b'),
-        { timeout: 5000 }
-    );
+    await expect(page.locator('#consoleCommandInput')).toHaveValue('a\\b');
 
     await page.keyboard.press('Escape');
-    await expect(termInput).not.toBeFocused();
+    await expect(page.locator('#consoleCommandInput')).not.toBeFocused();
 
     // Hotkeys work normally again once focus is back out.
     await page.keyboard.press('2');
