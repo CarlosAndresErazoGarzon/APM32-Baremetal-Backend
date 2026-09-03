@@ -1,0 +1,14 @@
+# Found missing while testing this Dockerfile locally (2026-09): without
+# this, `COPY . .` bakes the developer's own .env (Firebase secrets) and a
+# macOS-built node_modules (wrong platform for the container anyway) into
+# the image layer. Harmless for the real Render deploy specifically --
+# that builds from git, and both are already gitignored so Render's build
+# context never has them -- but a local `docker build` (or any future
+# non-git-based build path) shouldn't get to depend on that as its only
+# safeguard.
+node_modules
+.env
+.env.*
+test/
+test-results/
+playwright-report/

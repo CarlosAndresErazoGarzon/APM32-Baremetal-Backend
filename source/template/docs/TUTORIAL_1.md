@@ -37,6 +37,50 @@ Every time you interact with a pin, you must answer three questions:
 2. Is it a low pin (0 to 7) configured in `CFGLOW`, or a high pin (8 to 15) configured in `CFGHIG`?
 3. What hex code configures it as an Input / Output?
 
+Both of our hex codes below live in the same register (`CFGHIG`, since PB10-PB15 are all "high" pins) but mean opposite things -- here's the exact bit-by-bit difference between a Pull-Up **input** (`0x8`, used for the buttons) and a Push-Pull **output** (`0x3`, used for the LEDs). Check the **PIN MODES** tab for the complete CNF/MODE reference if this is your first time reading one of these.
+
+<div style="overflow-x:auto; margin: 1.5em 0;">
+<svg viewBox="0 0 648 190" width="100%" style="max-width: 648px; display:block; margin: 0 auto; font-family: 'Inconsolata', monospace;" role="img" aria-label="CFGHIG bit layout for PB10 (bits 11-8, 0x8: Input Pull-up/Pull-down) and PB12 (bits 19-16, 0x3: Output Push-Pull 50MHz)">
+  <!-- PB10 nibble (bits 11-8) -- Input, Pull-up/Pull-down -->
+  <text x="168" y="14" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-text)">PB10 -- bits 11..8 (Input)</text>
+  <path d="M 24 22 L 24 30 L 312 30 L 312 22" fill="none" stroke="var(--accent-text)" stroke-width="1.5"/>
+  <!-- PB12 nibble (bits 19-16) -- Output, Push-Pull -->
+  <text x="480" y="14" text-anchor="middle" font-size="12" font-weight="700" fill="var(--success-text)">PB12 -- bits 19..16 (Output)</text>
+  <path d="M 336 22 L 336 30 L 624 30 L 624 22" fill="none" stroke="var(--success-text)" stroke-width="1.5"/>
+  <!-- Bit index labels -->
+  <g font-size="11" fill="var(--sidebar-text)" text-anchor="middle">
+    <text x="60" y="46">11</text><text x="132" y="46">10</text><text x="204" y="46">9</text><text x="276" y="46">8</text>
+    <text x="372" y="46">19</text><text x="444" y="46">18</text><text x="516" y="46">17</text><text x="588" y="46">16</text>
+  </g>
+  <!-- Value boxes: PB10=0x8=1000, PB12=0x3=0011 (read as CNF1,CNF0,MODE1,MODE0) -->
+  <g stroke="var(--border-color)" stroke-width="1.5">
+    <rect x="24"  y="54" width="72" height="44" fill="none"/>
+    <rect x="96"  y="54" width="72" height="44" fill="none"/>
+    <rect x="168" y="54" width="72" height="44" fill="var(--sidebar-bg)"/>
+    <rect x="240" y="54" width="72" height="44" fill="var(--sidebar-bg)"/>
+    <rect x="336" y="54" width="72" height="44" fill="none"/>
+    <rect x="408" y="54" width="72" height="44" fill="none"/>
+    <rect x="480" y="54" width="72" height="44" fill="var(--sidebar-bg)"/>
+    <rect x="552" y="54" width="72" height="44" fill="var(--sidebar-bg)"/>
+  </g>
+  <g font-size="16" font-weight="700" fill="var(--text-main)" text-anchor="middle">
+    <text x="60" y="83">1</text><text x="132" y="83">0</text><text x="204" y="83">0</text><text x="276" y="83">0</text>
+    <text x="372" y="83">0</text><text x="444" y="83">0</text><text x="516" y="83">1</text><text x="588" y="83">1</text>
+  </g>
+  <!-- CNF/MODE sub-labels under each bit -->
+  <g font-size="9" fill="var(--text-muted)" text-anchor="middle">
+    <text x="60" y="112">CNF1</text><text x="132" y="112">CNF0</text><text x="204" y="112">MODE1</text><text x="276" y="112">MODE0</text>
+    <text x="372" y="112">CNF1</text><text x="444" y="112">CNF0</text><text x="516" y="112">MODE1</text><text x="588" y="112">MODE0</text>
+  </g>
+  <!-- Legend -->
+  <g font-size="12" fill="var(--text-main)">
+    <text x="24" y="145">0x8 (PB10) = 0b1000 -&gt; MODE[1:0]=00 (Input), CNF[1:0]=10 (Pull-up/Pull-down)</text>
+    <text x="24" y="164" fill="var(--text-muted)">0x3 (PB12) = 0b0011 -&gt; MODE[1:0]=11 (Output, 50MHz), CNF[1:0]=00 (Push-Pull)</text>
+    <text x="24" y="182" fill="var(--text-muted)">Same register (CFGHIG), same 4-bit-per-pin format -- opposite meaning depending on which nibble you're looking at.</text>
+  </g>
+</svg>
+</div>
+
 Insert the following code inside the `/* USER CODE BEGIN Init */` block:
 
 ```c

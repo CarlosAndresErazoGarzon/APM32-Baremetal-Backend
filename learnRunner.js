@@ -237,12 +237,14 @@ function listFilesRecursive(dir, base = dir) {
 // and execCommand() -- both need the exact same "materialize the student's
 // files into a real, disposable directory" step before spawning anything
 // into it.
-function createJobDir(prefix, files, binaryFiles) {
-    const jobId = crypto.randomBytes(8).toString('hex');
-    const jobDir = path.join('/tmp', `${prefix}_${jobId}`);
-
-    fs.mkdirSync(jobDir, { recursive: true, mode: 0o700 });
-
+// Writes `files` (plain utf8 text) and `binaryFiles` (base64) into an
+// ALREADY-EXISTING `dir`, rejecting path traversal/absolute paths, and
+// chowning whatever it wrote to the unprivileged learnrunner uid/gid when
+// sandboxed. Split out of createJobDir() (below) so ptySession.js's live
+// terminal can reuse the exact same write-one-entry logic to sync a
+// student's LATEST edits into an already-running session's jobDir
+// mid-session, not just at initial creation.
+function writeFilesIntoDir(dir, files, binaryFiles) {
     const writeEntry = (relPath, buf, executable) => {
         // This write happens before the unprivileged uid is dropped (that
         // only applies to whatever gets spawned into jobDir afterward), so
@@ -252,7 +254,7 @@ function createJobDir(prefix, files, binaryFiles) {
         if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
             throw new Error(`Invalid file path: ${relPath}`);
         }
-        const fullPath = path.join(jobDir, normalized);
+        const fullPath = path.join(dir, normalized);
         try {
             fs.mkdirSync(path.dirname(fullPath), { recursive: true });
             fs.writeFileSync(fullPath, buf);
@@ -284,22 +286,13 @@ function createJobDir(prefix, files, binaryFiles) {
         }
     };
 
-    try {
-        for (const [relPath, content] of Object.entries(files)) {
-            writeEntry(relPath, content || '', false);
+    for (const [relPath, content] of Object.entries(files || {})) {
+        writeEntry(relPath, content || '', false);
+    }
+    if (binaryFiles) {
+        for (const [relPath, base64Content] of Object.entries(binaryFiles)) {
+            writeEntry(relPath, Buffer.from(base64Content, 'base64'), true);
         }
-        if (binaryFiles) {
-            for (const [relPath, base64Content] of Object.entries(binaryFiles)) {
-                writeEntry(relPath, Buffer.from(base64Content, 'base64'), true);
-            }
-        }
-    } catch (err) {
-        // Every throw above used to leave whatever had already been
-        // written sitting in /tmp forever (the invalid-path branch was
-        // the only one that cleaned up) -- one cleanup path for all of
-        // them now, instead of relying on each new throw site to remember it.
-        fs.rmSync(jobDir, { recursive: true, force: true });
-        throw err;
     }
 
     const ids = getRunnerIds();
@@ -314,7 +307,25 @@ function createJobDir(prefix, files, binaryFiles) {
                 }
             }
         };
-        chownRecursive(jobDir);
+        chownRecursive(dir);
+    }
+}
+
+function createJobDir(prefix, files, binaryFiles) {
+    const jobId = crypto.randomBytes(8).toString('hex');
+    const jobDir = path.join('/tmp', `${prefix}_${jobId}`);
+
+    fs.mkdirSync(jobDir, { recursive: true, mode: 0o700 });
+
+    try {
+        writeFilesIntoDir(jobDir, files, binaryFiles);
+    } catch (err) {
+        // Every throw above used to leave whatever had already been
+        // written sitting in /tmp forever (the invalid-path branch was
+        // the only one that cleaned up) -- one cleanup path for all of
+        // them now, instead of relying on each new throw site to remember it.
+        fs.rmSync(jobDir, { recursive: true, force: true });
+        throw err;
     }
 
     return jobDir;
@@ -568,4 +579,11 @@ async function runLevel(levelId, code) {
     }
 }
 
-module.exports = { runLevel, runArbitrary, execCommand };
+module.exports = {
+    runLevel, runArbitrary, execCommand,
+    // Exported for ptySession.js -- the live interactive terminal (see that
+    // file) needs the exact same sandbox envelope (disposable jobDir,
+    // uid/gid drop, ulimit) this file already built and tested for the
+    // batch exec path, not a second copy of it.
+    createJobDir, writeFilesIntoDir, readJobFilesBack, getRunnerIds, SANDBOX_AVAILABLE,
+};

@@ -15,11 +15,19 @@ FROM node:18-slim
 # (host gcc compile+link+run, ARM cross-compile of the real firmware
 # template, and the learnrunner uid-drop + ulimit sandboxing) against this
 # exact package list before landing it.
+# python3 + g++ (gcc alone isn't enough -- node-gyp needs a C++ toolchain)
+# are for node-pty's native addon: it ships prebuilt binaries for macOS/
+# Windows but NOT linux-x64, so `npm install` compiles it from source here
+# every time. Confirmed (docker build, `npm install`, then actually
+# spawning a pty and reading data back) against this exact image before
+# landing it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-arm-none-eabi \
     binutils-arm-none-eabi \
     libnewlib-arm-none-eabi \
     gcc \
+    g++ \
+    python3 \
     libc6-dev \
     make \
     && rm -rf /var/lib/apt/lists/*
@@ -31,8 +39,11 @@ RUN useradd -u 1500 -M -s /usr/sbin/nologin learnrunner
 # Set working directory
 WORKDIR /app
 
-# Copy package files and install production dependencies
+# Copy package files AND scripts/ before installing -- node-pty's postinstall
+# (scripts/fix-node-pty-perms.js) needs to already exist on disk by the time
+# `npm install` runs it, not just whatever `package*.json` alone brings in.
 COPY package*.json ./
+COPY scripts ./scripts
 RUN npm install --production
 
 # Copy everything (it already includes template and components in source/)

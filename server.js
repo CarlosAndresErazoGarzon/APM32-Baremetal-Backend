@@ -4,9 +4,12 @@ const compression = require('compression');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 const { execSync } = require('child_process');
 const crypto = require('crypto');
-const { runLevel, runArbitrary, execCommand } = require('./learnRunner');
+const { WebSocketServer } = require('ws');
+const { runLevel, runArbitrary } = require('./learnRunner');
+const { createSession } = require('./ptySession');
 
 const app = express();
 // Load-bearing for frontend/vendor/wasm-clang/ (~60MB uncompressed: clang
@@ -222,40 +225,97 @@ app.post('/playground/run', async (req, res) => {
     }
 });
 
-// Playground's manual "terminal" tab: runs a raw command line the student
-// typed themselves (gcc with whatever flags, chained with &&, etc.) instead
-// of the fixed compile+run RUN button does. Same sandbox, see
-// learnRunner.js's execCommand().
-app.post('/playground/exec', async (req, res) => {
-    const { files, command, stdin, binaryFiles, cwd } = req.body;
+// Playground's manual "terminal" tab used to be a plain HTTP endpoint here
+// (one request per command, no live process) -- see git history for that
+// implementation (learnRunner.js's execCommand(), still exported and unit-
+// tested directly since it's a perfectly good piece of sandboxing on its
+// own) if it's ever needed again. Replaced by a real interactive shell over
+// a WebSocket (below) so a program mid-scanf() can actually receive more
+// input instead of only ever reading whatever was typed into a separate
+// box before the command even started.
 
-    if (!files || typeof files !== 'object') {
-        return res.status(400).json({ error: 'files is required' });
-    }
-    if (typeof command !== 'string' || command.trim() === '') {
-        return res.status(400).json({ error: 'command is required' });
-    }
+const httpServer = http.createServer(app);
 
-    try {
-        const result = await execCommand(files, command, stdin, binaryFiles, cwd);
-        res.json(result);
-    } catch (err) {
-        console.error('[playground/exec]', err.message);
-        res.status(400).json({ error: err.message });
-    }
+// One PtySession per connection (see ptySession.js) -- a real, persistent
+// bash the client streams raw bytes to/from, not a fresh sandbox per
+// command. noServer-less form (server + path) since this is the only
+// WebSocket endpoint this app has; nothing else needs its own upgrade
+// handling to coexist with.
+const wss = new WebSocketServer({ server: httpServer, path: '/playground/pty' });
+
+wss.on('connection', (ws) => {
+    let session = null;
+
+    // Guards against a client sending 'input'/'resize' (or a malformed
+    // repeat 'start') before/without ever sending a valid 'start' -- there's
+    // no session yet to forward those to.
+    const send = (msg) => {
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
+    };
+
+    ws.on('message', (raw) => {
+        let msg;
+        try {
+            msg = JSON.parse(raw);
+        } catch {
+            return send({ type: 'error', message: 'Malformed message' });
+        }
+
+        if (msg.type === 'start') {
+            if (session) return; // already started -- ignore a stray repeat
+            const { files, binaryFiles, cwd } = msg;
+            if (!files || typeof files !== 'object') {
+                return send({ type: 'error', message: 'files is required' });
+            }
+            try {
+                session = createSession({ files, binaryFiles, cwd });
+            } catch (err) {
+                console.error('[playground/pty] session create failed:', err.message);
+                return send({ type: 'error', message: err.message });
+            }
+            session.onData(data => send({ type: 'data', data }));
+            session.onFiles(({ outputFiles, binaryFiles }) => send({ type: 'files', outputFiles, binaryFiles }));
+            session.onExit((code, cwd) => {
+                send({ type: 'exit', code, cwd });
+                ws.close();
+            });
+            send({ type: 'ready' });
+        } else if (msg.type === 'input') {
+            if (session && typeof msg.data === 'string') session.write(msg.data);
+        } else if (msg.type === 'resize') {
+            if (session) session.resize(msg.cols, msg.rows);
+        } else if (msg.type === 'sync') {
+            // Keeps an already-running session's jobDir current with
+            // Monaco's latest content -- see ptySession.js's own header
+            // comment ("File sync, client -> jobDir") for why this exists.
+            if (session && msg.files && typeof msg.files === 'object') {
+                session.syncFiles(msg.files, msg.binaryFiles);
+            }
+        }
+    });
+
+    // Covers every way this connection can end -- the student closing the
+    // tab, a network drop, or the browser navigating away -- so a pty
+    // (and the ulimited-but-still-real OS process it's running) never
+    // outlives the WebSocket that's supposed to own it.
+    ws.on('close', () => { if (session) session.kill('ws-close'); });
+    ws.on('error', () => { if (session) session.kill('ws-error'); });
 });
 
 const PORT = process.env.PORT || 3000;
 // require.main check: only auto-listen when this file is run directly
 // (`node server.js`) -- normal `node server.js` behavior is unaffected.
 // backend/test/helpers/scratchServer.js instead requires this module and
-// calls app.listen(0) itself, so every test run gets a real OS-assigned
+// calls .listen(0) itself, so every test run gets a real OS-assigned
 // ephemeral port and can never collide with the user's own 3000 (or with
-// another test file's server running in parallel).
+// another test file's server running in parallel). Exports the http.Server
+// wrapping `app` (not `app` itself) now that WebSocket upgrades need to
+// share the same underlying server -- `.listen()` has the identical
+// signature either way, so scratchServer.js needs no changes.
 if (require.main === module) {
-    app.listen(PORT, () => {
+    httpServer.listen(PORT, () => {
         console.log(`APM32 Compiler API running on http://localhost:${PORT}`);
     });
 }
 
-module.exports = app;
+module.exports = httpServer;
