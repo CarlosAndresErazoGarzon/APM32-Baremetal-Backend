@@ -263,12 +263,12 @@ wss.on('connection', (ws) => {
 
         if (msg.type === 'start') {
             if (session) return; // already started -- ignore a stray repeat
-            const { files, binaryFiles, cwd } = msg;
+            const { files, binaryFiles, cwd, cols, rows } = msg;
             if (!files || typeof files !== 'object') {
                 return send({ type: 'error', message: 'files is required' });
             }
             try {
-                session = createSession({ files, binaryFiles, cwd });
+                session = createSession({ files, binaryFiles, cwd, cols, rows });
             } catch (err) {
                 console.error('[playground/pty] session create failed:', err.message);
                 return send({ type: 'error', message: err.message });

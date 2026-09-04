@@ -50,8 +50,26 @@ const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // no input for 5 minutes -> kill it
 const MAX_SESSION_MS = 20 * 60 * 1000; // hard cap regardless of activity
 const FILE_POLL_MS = 2000;
 
+// Same fallback the pty used to always spawn at, unconditionally --
+// kept as a last resort for a 'start' message that somehow doesn't carry
+// a real size (an old cached client build, or the very first fit() firing
+// so early the DOM genuinely reports 0).
+const DEFAULT_COLS = 80;
+const DEFAULT_ROWS = 24;
+
+// Shared by the initial spawn (constructor) and every later resize() call
+// -- a student's own terminal can be any size, so both clamp to something
+// sane a corrupt/malicious value (or a genuinely missing one, at spawn
+// time) can't hand the pty layer a 0 or absurd size.
+function clampCols(cols) {
+    return Math.max(2, Math.min(500, (cols | 0) || DEFAULT_COLS));
+}
+function clampRows(rows) {
+    return Math.max(2, Math.min(200, (rows | 0) || DEFAULT_ROWS));
+}
+
 class PtySession {
-    constructor({ files, binaryFiles, cwd }) {
+    constructor({ files, binaryFiles, cwd, cols, rows }) {
         this.jobDir = createJobDir('playground_pty', files, binaryFiles);
         this.dataHandlers = [];
         this.exitHandlers = [];
@@ -108,8 +126,12 @@ class PtySession {
 
         this.pty = pty.spawn('/bin/bash', spawnArgs, {
             name: 'xterm-256color',
-            cols: 80,
-            rows: 24,
+            // Real size from the client's own xterm.js, not a fixed
+            // guess -- see this.resize()'s clamping (same bounds) and the
+            // 'start' message's own comment in ConsoleUI.js for why a
+            // mismatch here is exactly what was scrambling wrapped lines.
+            cols: clampCols(cols),
+            rows: clampRows(rows),
             cwd: startDir,
             env,
             ...(ids ? { uid: ids.uid, gid: ids.gid } : {}),
@@ -199,12 +221,7 @@ class PtySession {
 
     resize(cols, rows) {
         if (this.killed) return;
-        // A student's own terminal can be any size -- clamp to something
-        // sane so a corrupt/malicious resize message can't hand the pty
-        // layer a 0 or absurd value.
-        const c = Math.max(2, Math.min(500, cols | 0));
-        const r = Math.max(2, Math.min(200, rows | 0));
-        try { this.pty.resize(c, r); } catch { /* pty already gone */ }
+        try { this.pty.resize(clampCols(cols), clampRows(rows)); } catch { /* pty already gone */ }
     }
 
     // Best-effort "what folder is the shell actually in right now", kept
