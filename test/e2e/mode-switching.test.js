@@ -75,9 +75,14 @@ test('Learn mode tree groups all 14 units under 3 super units, always expanded',
 
 test('progress on a pre-existing unit survives the super-unit reorganization', async ({ page }) => {
     // Simulates a real returning user: progress saved under the OLD flat
-    // unit/exercise ids, from before super units existed.
+    // unit/exercise ids, from before super units existed. sessionStorage,
+    // not localStorage -- a guest's progress lives there now (see
+    // guestStorage.js), and sessionStorage survives an addInitScript ->
+    // goto() sequence within the same page/tab exactly like it survives a
+    // real reload, so this still faithfully simulates "already had
+    // progress when the page loads".
     await page.addInitScript(() => {
-        localStorage.setItem('apm32_learn_progress', JSON.stringify({
+        sessionStorage.setItem('apm32_learn_progress', JSON.stringify({
             'intro/ejercicio-01': true,
             'bitwise_avanzado/ejercicio-02': true,
         }));

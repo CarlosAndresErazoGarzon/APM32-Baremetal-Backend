@@ -9,9 +9,16 @@
  * LearnBloc.setNamespace(uid|null), wired up in app.js on AUTH_LOGIN/
  * AUTH_LOGOUT, is the fix. Drives LearnBloc directly (dynamically
  * imported inside the page) rather than through the UI/real Firebase,
- * since this is really a localStorage-isolation unit test that happens
- * to need a real browser's localStorage + a real server to fetch
- * learn-levels/ from.
+ * since this is really a storage-isolation unit test that happens to
+ * need a real browser's storage + a real server to fetch learn-levels/
+ * from.
+ *
+ * Guest keys live in sessionStorage, not localStorage (see
+ * guestStorage.js's own comment -- a later, separate fix for a shared-
+ * lab-computer bug: plain localStorage's guest bucket survived
+ * indefinitely, so the NEXT person to open the browser without logging in
+ * inherited whatever the PREVIOUS guest typed). Account keys (A/B) still
+ * use localStorage, unaffected by that fix.
  */
 const { test, expect } = require('playwright/test');
 const { startScratchServer } = require('../helpers/scratchServer');
@@ -45,8 +52,8 @@ test('draft code and pass/fail progress stay isolated between guest and two diff
         bloc.emit({ code: 'GUEST EDIT MARKER' });
         bloc.saveDraft();
         bloc.emit({ progress: { ...bloc.state.progress, [levelKey]: true } });
-        localStorage.setItem('apm32_learn_progress', JSON.stringify(bloc.state.progress));
-        out.guestDraftKeyRaw = localStorage.getItem('apm32_learn_draft_' + unitId + '_' + exerciseId);
+        sessionStorage.setItem('apm32_learn_progress', JSON.stringify(bloc.state.progress));
+        out.guestDraftKeyRaw = sessionStorage.getItem('apm32_learn_draft_' + unitId + '_' + exerciseId);
 
         // 2. Signs in as account A -- no draft/progress of their own yet,
         // so both should reset to a clean slate, NOT the guest's.
@@ -61,7 +68,7 @@ test('draft code and pass/fail progress stay isolated between guest and two diff
         localStorage.setItem('apm32_learn_progress_uid-account-A', JSON.stringify(bloc.state.progress));
 
         // Guest's own key must be untouched by any of A's activity.
-        out.guestDraftKeyAfterA = localStorage.getItem('apm32_learn_draft_' + unitId + '_' + exerciseId);
+        out.guestDraftKeyAfterA = sessionStorage.getItem('apm32_learn_draft_' + unitId + '_' + exerciseId);
 
         // 3. Signs out (back to guest) -- must see the guest's own edit
         // again, not account A's.
