@@ -51,6 +51,50 @@ const uint8_t nums[10] = {
 
 Since we are strictly using the 8 lowest pins of Port A, we can configure all of them at once with a single instruction (rather than bit-by-bit masking). Then, we will configure `PB8` and `PB9` individually.
 
+Notice below that `PA0` (in `CFGLOW`) and `PB8` (in `CFGHIG`) both get the exact same `0x3` -- **different registers, same 4-bit-per-pin format**. `CFGLOW` always covers a port's pins 0-7, `CFGHIG` always covers pins 8-15, but bit position within each nibble means the same thing in both:
+
+<div style="overflow-x:auto; margin: 1.5em 0;">
+<svg viewBox="0 0 648 190" width="100%" style="max-width: 648px; display:block; margin: 0 auto; font-family: 'Inconsolata', monospace;" role="img" aria-label="PA0 in CFGLOW bits 3-0 and PB8 in CFGHIG bits 3-0, both set to 0x3: Output Push-Pull 50MHz">
+  <!-- PA0 nibble (CFGLOW, bits 3-0) -->
+  <text x="168" y="14" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-text)">PA0 -- CFGLOW bits 3..0</text>
+  <path d="M 24 22 L 24 30 L 312 30 L 312 22" fill="none" stroke="var(--accent-text)" stroke-width="1.5"/>
+  <!-- PB8 nibble (CFGHIG, bits 3-0) -->
+  <text x="480" y="14" text-anchor="middle" font-size="12" font-weight="700" fill="var(--success-text)">PB8 -- CFGHIG bits 3..0</text>
+  <path d="M 336 22 L 336 30 L 624 30 L 624 22" fill="none" stroke="var(--success-text)" stroke-width="1.5"/>
+  <!-- Bit index labels -->
+  <g font-size="11" fill="var(--sidebar-text)" text-anchor="middle">
+    <text x="60" y="46">3</text><text x="132" y="46">2</text><text x="204" y="46">1</text><text x="276" y="46">0</text>
+    <text x="372" y="46">3</text><text x="444" y="46">2</text><text x="516" y="46">1</text><text x="588" y="46">0</text>
+  </g>
+  <!-- Value boxes: both 0x3 = 0011 (read as CNF1,CNF0,MODE1,MODE0) -->
+  <g stroke="var(--border-color)" stroke-width="1.5">
+    <rect x="24"  y="54" width="72" height="44" fill="none"/>
+    <rect x="96"  y="54" width="72" height="44" fill="none"/>
+    <rect x="168" y="54" width="72" height="44" fill="var(--sidebar-bg)"/>
+    <rect x="240" y="54" width="72" height="44" fill="var(--sidebar-bg)"/>
+    <rect x="336" y="54" width="72" height="44" fill="none"/>
+    <rect x="408" y="54" width="72" height="44" fill="none"/>
+    <rect x="480" y="54" width="72" height="44" fill="var(--sidebar-bg)"/>
+    <rect x="552" y="54" width="72" height="44" fill="var(--sidebar-bg)"/>
+  </g>
+  <g font-size="16" font-weight="700" fill="var(--text-main)" text-anchor="middle">
+    <text x="60" y="83">0</text><text x="132" y="83">0</text><text x="204" y="83">1</text><text x="276" y="83">1</text>
+    <text x="372" y="83">0</text><text x="444" y="83">0</text><text x="516" y="83">1</text><text x="588" y="83">1</text>
+  </g>
+  <!-- CNF/MODE sub-labels under each bit -->
+  <g font-size="9" fill="var(--text-muted)" text-anchor="middle">
+    <text x="60" y="112">CNF1</text><text x="132" y="112">CNF0</text><text x="204" y="112">MODE1</text><text x="276" y="112">MODE0</text>
+    <text x="372" y="112">CNF1</text><text x="444" y="112">CNF0</text><text x="516" y="112">MODE1</text><text x="588" y="112">MODE0</text>
+  </g>
+  <!-- Legend -->
+  <g font-size="12" fill="var(--text-main)">
+    <text x="24" y="145">0x3 = 0b0011 -&gt; MODE[1:0]=11 (Output, 50MHz), CNF[1:0]=00 (Push-Pull)</text>
+    <text x="24" y="164" fill="var(--text-muted)">Identical bit pattern in both registers -- only WHICH register (and which nibble inside it) changes which physical pin it controls.</text>
+    <text x="24" y="182" fill="var(--text-muted)">Check the PIN MODES tab for every other CNF/MODE combination.</text>
+  </g>
+</svg>
+</div>
+
 Add this inside `/* USER CODE BEGIN Init */`:
 
 ```c

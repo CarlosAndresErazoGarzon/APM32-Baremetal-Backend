@@ -1,9 +1,16 @@
 /**
  * terminal-tab-complete.test.js
- * ConsoleUI.js's Tab-completes-filenames feature -- Playground's manual
- * terminal input (#consoleCommandInput) completes against virtualFS's own
- * filenames and this session's compiled binary names, not a hardcoded
- * command list (see that file's own header comment for why).
+ * ConsoleUI.js used to implement its own client-side filename completion
+ * against virtualFS's own keys (no PATH command-name completion, since the
+ * real available command set lives in the sandbox's shell, not anywhere
+ * this client had an authoritative answer for -- see git history for that
+ * implementation). Now that the terminal is a real pty-backed bash (see
+ * backend/ptySession.js), Tab reaches bash's OWN readline completion
+ * directly -- this is the regression test for the part that's actually
+ * this app's responsibility: that a raw Tab keypress reaches the pty as a
+ * plain byte instead of the browser's default "jump to the next focusable
+ * element" behavior, which would silently un-focus the terminal instead of
+ * completing anything.
  */
 const { test, expect } = require('playwright/test');
 const { startScratchServer } = require('../helpers/scratchServer');
@@ -18,51 +25,51 @@ test.afterAll(async () => {
     await scratch.stop();
 });
 
-test('Tab completes a unique filename match', async ({ page }) => {
+test('Tab reaches the real shell and completes a unique filename', async ({ page }) => {
     await page.goto(`${scratch.baseUrl}/index.html`, { waitUntil: 'networkidle' });
     await page.click('#playgroundModeBtn');
     await page.waitForTimeout(500);
 
-    const input = page.locator('#consoleCommandInput');
-    await input.click();
-    await input.type('gcc ma');
-    await input.press('Tab');
+    await page.click('#consoleTabBtn');
+    await page.waitForTimeout(800); // pty session connects lazily
 
-    await expect(input).toHaveValue('gcc main.c');
-
-    // Focus never left the input -- the default Tab behavior (jump to the
-    // next focusable element) must have been suppressed.
-    await expect(input).toBeFocused();
-});
-
-test('Tab completes a compiled binary as "./name", and lists ambiguous matches instead of guessing', async ({ page }) => {
-    await page.goto(`${scratch.baseUrl}/index.html`, { waitUntil: 'networkidle' });
-    await page.click('#playgroundModeBtn');
-    await page.waitForTimeout(500);
-
-    const input = page.locator('#consoleCommandInput');
-
-    // Compile first so a real binary exists in this session.
-    await input.click();
-    await input.type('gcc main.c -o test');
-    await input.press('Enter');
+    await page.click('#consoleXtermMount');
+    await page.keyboard.type('cat ma');
+    await page.keyboard.press('Tab');
+    // Give bash's own readline a moment to answer -- not a round trip to
+    // this app's server logic, just the pty's own local echo of whatever
+    // it completed to.
     await page.waitForFunction(
-        () => !document.getElementById('consoleCommandInput').disabled,
-        { timeout: 15000 }
+        () => document.getElementById('consoleXtermMount').innerText.includes('cat main.c'),
+        { timeout: 5000 }
     );
 
-    await input.type('./te');
-    await input.press('Tab');
-    await expect(input).toHaveValue('./test');
+    // The default browser Tab behavior (move focus to the next element)
+    // must have been suppressed -- the hidden textarea xterm.js types
+    // into should still be the active element, not e.g. the Clear button
+    // that happens to sit right after this panel in tab order.
+    const stillFocused = await page.evaluate(() =>
+        document.activeElement?.classList.contains('xterm-helper-textarea')
+    );
+    expect(stillFocused).toBe(true);
+});
 
-    // Now create an ambiguous prefix: "main.c" and a hypothetical second
-    // file both starting with "ma" already exist as virtualFS grows via
-    // the New File button -- simpler and just as valid here: assert the
-    // single-candidate case above proves real completion happened, and
-    // separately confirm that a prefix matching NOTHING leaves the input
-    // untouched instead of clearing/mangling it.
-    await input.fill('');
-    await input.type('gcc zzz');
-    await input.press('Tab');
-    await expect(input).toHaveValue('gcc zzz');
+test('Tab with no matching file leaves the shell waiting instead of guessing', async ({ page }) => {
+    await page.goto(`${scratch.baseUrl}/index.html`, { waitUntil: 'networkidle' });
+    await page.click('#playgroundModeBtn');
+    await page.waitForTimeout(500);
+
+    await page.click('#consoleTabBtn');
+    await page.waitForTimeout(800);
+
+    await page.click('#consoleXtermMount');
+    await page.keyboard.type('cat zzz');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(500);
+
+    // Bash's completion has nothing to offer for "zzz" -- the line stays
+    // exactly as typed (at most a bell/no-op), never silently mangled or
+    // cleared.
+    const text = await page.evaluate(() => document.getElementById('consoleXtermMount').innerText);
+    expect(text).toContain('cat zzz');
 });

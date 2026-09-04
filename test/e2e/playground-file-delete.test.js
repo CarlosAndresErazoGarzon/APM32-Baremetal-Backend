@@ -17,8 +17,13 @@
  *      :hover-based actionability check for this opacity-on-hover pattern.
  *   2. Typing "clear" in the manual terminal printed raw ANSI escape
  *      bytes ("[H[2J[3J") instead of clearing anything -- the transcript
- *      is a plain div, not a real terminal emulator. Fixed by
- *      intercepting the literal "clear" command client-side.
+ *      used to be a plain div, not a real terminal emulator, so it had no
+ *      way to interpret them (fixed at the time by intercepting the
+ *      literal "clear" command client-side). Now that the terminal is a
+ *      real pty + xterm.js (see backend/ptySession.js/ConsoleUI.js), the
+ *      real `clear` binary and its real escape codes work correctly on
+ *      their own -- this test now guards THAT instead of the client-side
+ *      workaround, which no longer exists.
  */
 const { test, expect } = require('playwright/test');
 const { startScratchServer } = require('../helpers/scratchServer');
@@ -80,26 +85,31 @@ test('deleting a file via the sidebar menu works', async ({ page }) => {
     await expect(page.locator('#playgroundFileTreeList')).not.toContainText('extra.c');
 });
 
-test('typing "clear" in the terminal wipes the transcript instead of printing raw escape codes', async ({ page }) => {
+test('typing "clear" in the terminal wipes the screen instead of printing raw escape codes', async ({ page }) => {
     await page.goto(`${scratch.baseUrl}/index.html`, { waitUntil: 'networkidle' });
     await page.click('#playgroundModeBtn');
     await page.waitForTimeout(500);
     await page.click('#consoleTabBtn');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(800); // pty session connects lazily
 
-    await page.fill('#consoleCommandInput', 'gcc main.c -o test');
-    await page.press('#consoleCommandInput', 'Enter');
+    await page.click('#consoleXtermMount');
+    await page.keyboard.type('echo before-clear');
+    await page.keyboard.press('Enter');
     await page.waitForFunction(
-        () => document.getElementById('consoleOutput')?.innerText.includes('exit code'),
+        () => document.getElementById('consoleXtermMount').innerText.includes('before-clear'),
         { timeout: 10000 }
     );
-    const before = await page.locator('#consoleOutput').innerText();
-    expect(before.length).toBeGreaterThan(0);
 
-    await page.fill('#consoleCommandInput', 'clear');
-    await page.press('#consoleCommandInput', 'Enter');
-    await page.waitForTimeout(300);
+    await page.keyboard.type('clear');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(500);
 
-    const after = await page.locator('#consoleOutput').innerText();
-    expect(after).toBe('');
+    const after = await page.evaluate(() => document.getElementById('consoleXtermMount').innerText);
+    // A real terminal clear leaves just the fresh prompt on screen -- no
+    // literal escape-code garbage ("[H[2J[3J", the exact old bug), and
+    // none of the earlier "before-clear" transcript still visible.
+    expect(after).not.toContain('[H');
+    expect(after).not.toContain('[2J');
+    expect(after).not.toContain('before-clear');
+    expect(after.trim().endsWith('$')).toBe(true);
 });

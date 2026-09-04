@@ -7,10 +7,10 @@
  * gain, same class of fix as the /vendor/wasm-clang/ compression carve-out
  * above it in server.js).
  *
- * Lives inside #sidebarSettingsPanel now (see SidebarSettingsUI.js) --
- * everything that isn't the file tree itself moved behind the sidebar's
- * gear icon so the tree gets the sidebar's full height on short
- * viewports, so it's hidden until that panel is opened.
+ * Lives on the Settings tab now (see ModeSwitcherUI.js/index.html's
+ * #settingsPanel) -- its own top-level destination next to IDE/LEARN/
+ * PLAYGROUND, not a gear-icon dropdown -- so it's hidden until that mode
+ * is switched to.
  */
 const { test, expect } = require('playwright/test');
 const { startScratchServer } = require('../helpers/scratchServer');
@@ -27,7 +27,7 @@ test.afterAll(async () => {
 
 test('the [Extension] button links to a real, uncompressed .vsix', async ({ page }) => {
     await page.goto(`${scratch.baseUrl}/index.html`, { waitUntil: 'networkidle' });
-    await page.click('#sidebarSettingsBtn');
+    await page.click('#settingsModeBtn');
 
     const btn = page.locator('#downloadExtensionBtn');
     await expect(btn).toBeVisible();
