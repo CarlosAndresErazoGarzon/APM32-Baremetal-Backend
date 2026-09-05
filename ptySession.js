@@ -77,6 +77,10 @@ class PtySession {
         this.lastSnapshotJSON = null;
         this.lastKnownCwd = '';
         this.killed = false;
+        // The editor-tracked filenames as of the last seed/sync -- see
+        // syncFiles()'s own comment for the real bug this exists to fix
+        // (deleting a file in the editor never actually deleted it here).
+        this.lastEditorFileNames = new Set(Object.keys(files || {}));
 
         const ids = getRunnerIds();
         const startDir = this._resolveStartDir(cwd);
@@ -206,6 +210,33 @@ class PtySession {
         if (this.killed) return;
         try {
             writeFilesIntoDir(this.jobDir, files, binaryFiles);
+
+            // Real reported bug: deleting a file in the editor never
+            // actually deleted it here -- writeFilesIntoDir only ever
+            // WRITES whatever's in `files`, it has no concept of "this
+            // key used to exist and doesn't anymore" (its OTHER caller,
+            // createJobDir, has nothing to diff against on first creation
+            // either, so that method was never the right place for this).
+            // The stale file just sat in jobDir forever, so the NEXT
+            // file-poll tick (see _pollFiles()) kept reading it back off
+            // disk and handing it to the client's mergeChangedFiles() as
+            // if the terminal itself had changed it -- which, compared
+            // against the client's own freshly-synced (file-deleted)
+            // state, looked exactly like "the terminal just recreated
+            // this file", resurrecting whatever the student had just
+            // deleted.
+            // Only ever removes a name that WAS tracked here before and
+            // is gone now -- a compiled binary sitting in jobDir is never
+            // part of `files`/lastEditorFileNames to begin with, so it's
+            // never a deletion candidate.
+            const currentNames = new Set(Object.keys(files || {}));
+            for (const name of this.lastEditorFileNames) {
+                if (currentNames.has(name)) continue;
+                const normalized = path.normalize(name);
+                if (normalized.startsWith('..') || path.isAbsolute(normalized)) continue;
+                try { fs.rmSync(path.join(this.jobDir, normalized), { force: true }); } catch { /* already gone */ }
+            }
+            this.lastEditorFileNames = currentNames;
         } catch {
             // A bad path in `files` (shouldn't happen -- these are real
             // project files, not user-typed paths) -- not worth killing
