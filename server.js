@@ -9,7 +9,20 @@ const { execSync } = require('child_process');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { runLevel, runArbitrary } = require('./learnRunner');
-const { createSession } = require('./ptySession');
+const { createSession, getActiveSessionCount } = require('./ptySession');
+
+// A real incident: the backend hit its host's memory limit. A PERSISTENT
+// pty session (up to ptySession.js's own MAX_SESSION_MS each) costs memory
+// for as long as it stays open, unlike the old spawn-run-exit-in-seconds
+// batch model -- a classroom's worth of concurrent terminals can add up to
+// multiples of what that old model ever had live at once, even with every
+// individual session behaving. ptySession.js's own per-session ulimit -v
+// caps how much any ONE session could use, but says nothing about how
+// MANY can be open at the same time -- this is the other half of that
+// fix. 15 is a starting point, not a measured ceiling (no access to the
+// actual host's real memory limit from here) -- raise or lower it based
+// on what the host can actually sustain.
+const MAX_CONCURRENT_SESSIONS = 15;
 
 const app = express();
 // Load-bearing for frontend/vendor/wasm-clang/ (~60MB uncompressed: clang
@@ -266,6 +279,13 @@ wss.on('connection', (ws) => {
             const { files, binaryFiles, cwd, cols, rows } = msg;
             if (!files || typeof files !== 'object') {
                 return send({ type: 'error', message: 'files is required' });
+            }
+            if (getActiveSessionCount() >= MAX_CONCURRENT_SESSIONS) {
+                // Refused BEFORE spawning anything -- the whole point is
+                // never letting the count exceed the cap in the first
+                // place, so nothing here needs its own cleanup path.
+                console.warn(`[playground/pty] refused: ${getActiveSessionCount()} sessions already active (cap ${MAX_CONCURRENT_SESSIONS})`);
+                return send({ type: 'error', message: 'El servidor está al límite de terminales simultáneas -- probá de nuevo en un minuto.' });
             }
             try {
                 session = createSession({ files, binaryFiles, cwd, cols, rows });

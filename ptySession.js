@@ -45,10 +45,36 @@ const { createJobDir, writeFilesIntoDir, readJobFilesBack, getRunnerIds, SANDBOX
 // this is a whole interactive session, not one quick graded check, and a
 // real terminal session dying mid-command because of a tight CPU-time cap
 // would feel broken rather than safe. Still bounded, just not razor-thin.
-const ULIMIT = 'ulimit -v 262144; ulimit -t 60; ulimit -f 8192; ulimit -u 32';
+//
+// -v 98304 (96MB), not the original 262144 (256MB) -- a real reported
+// incident: the backend hit its host's memory limit. Root cause: this is a
+// PERSISTENT session (up to MAX_SESSION_MS each), not the old
+// spawn-run-exit-in-seconds batch model, so its memory cost is "N students
+// x up to their own ulimit, for as long as each stays connected" instead
+// of "however many compiles happen to overlap for a few seconds" -- a
+// classroom's worth of concurrent terminals could add up to multiples of
+// the OLD model's peak, even with nothing individually wrong. 96MB was
+// picked by actually testing (real Linux container, matching this image)
+// how low gcc itself tolerates going: it broke between 32-64MB (cc1
+// itself segfaulting or failing to even load its shared libs), while 64MB
+// compiled and ran a realistic program (malloc, recursion, buffers) fine.
+// 96MB keeps a real margin above that observed failure point instead of
+// riding the edge, while still cutting per-session worst-case memory by
+// ~2.7x from the original number. See server.js's MAX_CONCURRENT_SESSIONS
+// for the OTHER half of this fix -- a per-session cap alone doesn't bound
+// how many sessions can be open AT ONCE.
+const ULIMIT = 'ulimit -v 98304; ulimit -t 60; ulimit -f 8192; ulimit -u 32';
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // no input for 5 minutes -> kill it
 const MAX_SESSION_MS = 20 * 60 * 1000; // hard cap regardless of activity
 const FILE_POLL_MS = 2000;
+
+// Exposed so server.js can refuse a new session once too many are already
+// live -- see that file's own comment for why a PER-session memory cap
+// alone doesn't protect against this.
+let activeSessionCount = 0;
+function getActiveSessionCount() {
+    return activeSessionCount;
+}
 
 // Same fallback the pty used to always spawn at, unconditionally --
 // kept as a last resort for a 'start' message that somehow doesn't carry
@@ -156,6 +182,13 @@ class PtySession {
             this._pollFiles();
             this._refreshKnownCwd();
         }, FILE_POLL_MS);
+
+        // Last line of the constructor, deliberately -- everything above
+        // (createJobDir, pty.spawn) can throw, and if it does, this
+        // session object never finishes constructing, so nothing will
+        // ever call kill() on it to balance a decrement. Only counting a
+        // session once it's fully alive keeps this accurate.
+        activeSessionCount++;
     }
 
     // relCwd is only ever something a PREVIOUS pty session's client echoed
@@ -282,6 +315,7 @@ class PtySession {
     kill(_reason) {
         if (this.killed) return;
         this.killed = true;
+        activeSessionCount--;
         this._stopTimers();
         try { this.pty.kill(); } catch { /* already dead */ }
         this._cleanupJobDir();
@@ -292,4 +326,4 @@ function createSession(opts) {
     return new PtySession(opts);
 }
 
-module.exports = { createSession };
+module.exports = { createSession, getActiveSessionCount };
