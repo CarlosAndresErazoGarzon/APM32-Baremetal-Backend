@@ -18,12 +18,16 @@
  * File sync, jobDir -> client: because the shell can now stay open
  * indefinitely (not one request per command), there's no single "end of
  * the exec() call" moment to diff jobDir against the file manager like the
- * old flow did. Instead this polls jobDir every FILE_POLL_MS and only
- * fires the onFiles callback when something actually changed (cheap
- * JSON-stringify comparison against the last snapshot) -- so `gcc foo.c`
- * or a program's own fopen("log.txt","w") shows up in the file tree
- * within a couple seconds, without re-sending the whole project on every
- * single tick.
+ * old flow did. This used to poll jobDir on a fixed clock (every 2s,
+ * regardless of whether anything was happening) -- replaced after a real
+ * incident (a background clock ticking during active typing raced the
+ * editor and periodically clobbered it, see ConsoleUI.js's own history)
+ * with a debounce keyed off the pty's OWN output instead: every time the
+ * shell prints anything, a short quiet-timer resets; once output actually
+ * stops for OUTPUT_QUIET_MS, that's a good proxy for "a command just
+ * finished" (or at least stopped producing output), and exactly one poll
+ * runs then. No clock runs at all while the student is just sitting in
+ * the editor with an idle terminal -- there's nothing to be quiet after.
  *
  * File sync, client -> jobDir: the OTHER direction. The session's jobDir
  * is only ever seeded ONCE, when the session is created -- if the student
@@ -66,7 +70,13 @@ const { createJobDir, writeFilesIntoDir, readJobFilesBack, getRunnerIds, SANDBOX
 const ULIMIT = 'ulimit -v 98304; ulimit -t 60; ulimit -f 8192; ulimit -u 32';
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // no input for 5 minutes -> kill it
 const MAX_SESSION_MS = 20 * 60 * 1000; // hard cap regardless of activity
-const FILE_POLL_MS = 2000;
+// How long the pty has to stay quiet (no new output) before a file-poll
+// runs -- see this file's header comment. Long enough that a command's
+// own output (compiler warnings, a program printing a menu) doesn't
+// trigger several polls mid-stream as it trickles in one buffer at a
+// time; short enough that the file tree still updates promptly once a
+// command actually finishes.
+const OUTPUT_QUIET_MS = 400;
 
 // Exposed so server.js can refuse a new session once too many are already
 // live -- see that file's own comment for why a PER-session memory cap
@@ -167,7 +177,14 @@ class PtySession {
             ...(ids ? { uid: ids.uid, gid: ids.gid } : {}),
         });
 
-        this.pty.onData(data => this.dataHandlers.forEach(cb => cb(data)));
+        this.pty.onData(data => {
+            this.dataHandlers.forEach(cb => cb(data));
+            // See this file's header comment -- every chunk of real
+            // output resets the quiet-timer instead of a fixed poll
+            // clock running independently of whether anything's actually
+            // happening.
+            this._armQuietTimer();
+        });
         this.pty.onExit(({ exitCode }) => {
             this._stopTimers();
             // this.lastKnownCwd, not a fresh procfs read -- the pty (and
@@ -178,10 +195,6 @@ class PtySession {
 
         this._armIdleTimer();
         this.maxTimer = setTimeout(() => this.kill('timeout'), MAX_SESSION_MS);
-        this.pollTimer = setInterval(() => {
-            this._pollFiles();
-            this._refreshKnownCwd();
-        }, FILE_POLL_MS);
 
         // Last line of the constructor, deliberately -- everything above
         // (createJobDir, pty.spawn) can throw, and if it does, this
@@ -211,6 +224,20 @@ class PtySession {
         this.idleTimer = setTimeout(() => this.kill('idle'), IDLE_TIMEOUT_MS);
     }
 
+    // Restarted on every chunk of pty output -- fires once output has
+    // actually gone quiet for OUTPUT_QUIET_MS, which is when a poll is
+    // both useful (a command likely just finished) and cheap (it won't
+    // immediately fire again next tick the way a fixed clock would while
+    // output is still trickling in).
+    _armQuietTimer() {
+        if (this.killed) return;
+        clearTimeout(this.quietTimer);
+        this.quietTimer = setTimeout(() => {
+            this._pollFiles();
+            this._refreshKnownCwd();
+        }, OUTPUT_QUIET_MS);
+    }
+
     _pollFiles() {
         if (this.killed) return;
         let snapshot;
@@ -228,7 +255,7 @@ class PtySession {
     _stopTimers() {
         clearTimeout(this.idleTimer);
         clearTimeout(this.maxTimer);
-        clearInterval(this.pollTimer);
+        clearTimeout(this.quietTimer);
     }
 
     _cleanupJobDir() {

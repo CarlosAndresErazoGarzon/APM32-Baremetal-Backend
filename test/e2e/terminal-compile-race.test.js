@@ -51,16 +51,21 @@ test('compiling immediately after editing sees the LATEST content, not a stale s
     await page.keyboard.press('End');
     await page.keyboard.insertText('\n// RACE_MARKER_LINE');
 
+    // `greprc=$?` appears in the command; `greprc=<digit>` only in the
+    // OUTPUT -- so neither the wait nor the assert can be satisfied by
+    // the pty just echoing the command line back. rc 0 = grep matched
+    // the just-typed line (jobDir has the latest content); rc 1 = it
+    // ran against a stale main.c missing that line; rc 2 = no file.
     await page.click('#consoleXtermMount');
-    await page.keyboard.insertText('grep RACE_MARKER_LINE main.c');
+    await page.keyboard.insertText('grep RACE_MARKER_LINE main.c > /dev/null 2>&1; echo "greprc=$?"');
     await page.keyboard.press('Enter');
 
     await page.waitForFunction(
-        () => document.getElementById('consoleXtermMount').innerText.includes('RACE_MARKER_LINE'),
+        () => /greprc=\d/.test(document.getElementById('consoleXtermMount').innerText),
         { timeout: 5000 }
     );
     const text = await page.evaluate(() => document.getElementById('consoleXtermMount').innerText);
-    expect(text).not.toContain('No such file');
+    expect(text).toContain('greprc=0');
 });
 
 test('a file created and used in the same breath is found, not "No such file"', async ({ page }) => {
