@@ -67,9 +67,17 @@ To use them as free pins, you must **disable the JTAG module** while preserving 
 ```c
 // 1. Enable Alternate Function IO (AFIO) clock
 RCM->APB2CLKEN |= (1 << 0);
-// 2. Modify MAPR register (PCFG1 in the APM32 library) to disable JTAG
-AFIO->PCFG1 = (AFIO->PCFG1 & ~(0x7 << 24)) | (0x2 << 24); 
+// 2. Modify REMAP1 (the SWJCFG bits, [26:24]) to disable JTAG while keeping SWD
+AFIO->REMAP1 = (AFIO->REMAP1 & ~(0x7 << 24)) | (0x2 << 24);
 ```
+
+`REMAP1` is a `union` in `apm32f10x.h` -- the same 3 bits are also reachable through its bitfield struct, `REMAP1_B.SWJCFG`, if you'd rather name the field than mask/shift it by hand:
+
+```c
+AFIO->REMAP1_B.SWJCFG = 0x2; // same effect as the line above
+```
+
+Note this field is `__OM` (write-only) in the header -- on real hardware `SWJCFG` always reads back as 0 regardless of what you last wrote, so don't rely on reading it to check the current config. Writing it (either form above) works fine.
 
 ---
 

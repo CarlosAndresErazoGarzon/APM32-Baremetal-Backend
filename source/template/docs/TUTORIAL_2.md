@@ -18,28 +18,56 @@ This setup is a **Multiplexed Common Anode** system.
 
 ---
 
-## 1. The Display Alphabet
+## 1. Find YOUR Board's Segment Wiring First
 
-We will save the logical pattern for each number from 0 to 9 in an array. In positive logic, a '0' (`0b00111111` = `0x3F`) lights up segments A, B, C, D, E, F. We will bitwise negate (`~`) this pattern in the code when sending it to the port to fit our inverted connection.
+> [!WARNING]
+> **Which physical pin drives which segment (A-G) is NOT guaranteed to be the same on every display unit** -- it depends on the internal PCB routing of the specific module you were handed, which varies between suppliers/batches even for visually identical parts. A real reported bug: a previous version of this page assumed a fixed, scrambled bit order that turned out to be wrong for the boards actually in the lab, and produced garbled digits with code that was otherwise 100% correct. **Don't copy the table in Section 2 blindly -- verify your own wiring first**, with either method below.
+
+### Method A: One segment at a time (recommended -- uses only what you already have)
+
+Configure `PA0`-`PA7` as outputs (Section 3 below shows how), then in `while(1)` drive **exactly one bit HIGH at a time**, with a long delay so you can actually see it:
+
+```c
+for (uint8_t bit = 0; bit < 8; bit++) {
+    GPIOA->ODATA = ~(1 << bit); // Common Anode: 0 = ON, so every OTHER segment
+                                 // must be 1 (off) -- only `bit` goes to 0.
+    delay_ms(1500);
+}
+```
+
+Watch the display and write down, for each `bit` (0 through 7), which segment lit up (A, B, C, D, E, F, G, or the decimal point DP). That mapping -- not the one in this doc -- is the one you use for your own `nums[]` array.
+
+### Method B: Multimeter, no code needed
+
+With the board unpowered, set your multimeter to **diode/continuity mode** and probe the Common pin (anode or cathode, whichever your module is) against each of the 8 data pins in turn. On a Common Anode display, the segment LED whose pin you're touching will light up faintly -- again, note which segment lights for which pin.
+
+---
+
+## 2. The Display Alphabet
+
+Once you know YOUR board's mapping, build the lookup table around it. This tutorial's own board measured out to the simplest possible case -- **segment A on `PA0`, B on `PA1`, C on `PA2`, D on `PA3`, E on `PA4`, F on `PA5`, G on `PA6`** (bit `N` of the byte you send to `GPIOA->ODATA` is segment `N`, in alphabetical order) -- so that's the example used here. If Method A/B above gave you a different order, re-derive each value the same way: set the bit for every segment that should be ON, leave the rest 0, matching YOUR bit-to-segment assignment instead of this one.
+
+In positive logic, a '0' (`0b00111111` = `0x3F`) lights up segments A, B, C, D, E, F. We will bitwise negate (`~`) this pattern in the code when sending it to the port to fit our inverted (Common Anode) connection.
 
 Declare this before the `main` function in your `main.c`:
 
 ```c
 /* USER CODE BEGIN Private Functions */
 
-// Bit structure: 0b0gfedcba
-// A6=g, A5=f, A4=a, A3=b, A2=e, A1=d, A0=c
+// Bit structure (THIS board): 0b0gfedcba, straight alphabetical --
+// bit0=A, bit1=B, bit2=C, bit3=D, bit4=E, bit5=F, bit6=G. Verify this
+// matches YOUR board with Method A/B above before trusting these values.
 const uint8_t nums[10] = {
-    0x3F, // 0 -> 0b00111111
-    0x09, // 1 -> 0b00001001 
-    0x5E, // 2 -> 0b01011110
-    0x5B, // 3 -> 0b01011011
-    0x69, // 4 -> 0b01101001
-    0x73, // 5 -> 0b01110011
-    0x77, // 6 -> 0b01110111
-    0x19, // 7 -> 0b00011001
-    0x7F, // 8 -> 0b01111111
-    0x7B  // 9 -> 0b01111011
+    0x3F, // 0
+    0x06, // 1
+    0x5B, // 2
+    0x4F, // 3
+    0x66, // 4
+    0x6D, // 5
+    0x7D, // 6
+    0x07, // 7
+    0x7F, // 8
+    0x6F  // 9
 };
 
 /* USER CODE END Private Functions */
@@ -47,7 +75,7 @@ const uint8_t nums[10] = {
 
 ---
 
-## 2. Super Fast Configuration
+## 3. Super Fast Configuration
 
 Since we are strictly using the 8 lowest pins of Port A, we can configure all of them at once with a single instruction (rather than bit-by-bit masking). Then, we will configure `PB8` and `PB9` individually.
 
@@ -123,7 +151,7 @@ GPIOB->ODATA |= (1 << 8) | (1 << 9);
 
 ---
 
-## 3. Main Loop: Persistence of Vision
+## 4. Main Loop: Persistence of Vision
 
 To display a number like "85", our MCU must perform:
 1. Turn OFF both transistors.
